@@ -3527,11 +3527,13 @@ static NSString* WifiChannelText(const SystemInfoWifi* wifi)
   return @(text);
 }
 
-// Wi-Fi's hover label: connected, "Wi-Fi: -50 dBm" and then a line each for the details the macOS Wi-Fi menu lists with
-// Option held, in its order, but those that need Location Services (the network's name, its BSSID, the country code), the
-// MCS index and NSS, which CoreWLAN does not give, and the RSSI, which is the first line: "IP Address:", "Router:", "MAC
-// Address:", "Security:", "Channel:", "Noise:", "Tx Rate:" and "PHY Mode:"; a detail that was not read (ip, router and mac
-// empty), or that has no name, has no line. Else "Wi-Fi: off" or "Wi-Fi: not connected"
+// Wi-Fi's hover label: connected, "Wi-Fi:" and the signal (-50 dBm), then a line each for the details the macOS Wi-Fi
+// menu lists with Option held, in its order, but those that need Location Services (the network's name, its BSSID, the
+// country code), the MCS index and NSS, which CoreWLAN does not give, and the RSSI, which is the first line: "IP
+// Address:", "Router:", "MAC Address:", "Security:", "Channel:", "Noise:", "Tx Rate:" and "PHY Mode:"; a detail that was
+// not read (ip, router and mac empty), or that has no name, has no line. Each name, "Wi-Fi:" included, is padded with
+// spaces to 15 characters ("MAC Address:", the longest, and three), so the values start in one column in the label's
+// monospace font ("Wi-Fi:         -50 dBm"). Else "Wi-Fi: off" or "Wi-Fi: not connected"
 static NSString* WifiTipText(const SystemInfoWifi* wifi, const char* ip, const char* router, const char* mac)
 {
   if (!wifi->present)
@@ -3546,29 +3548,30 @@ static NSString* WifiTipText(const SystemInfoWifi* wifi, const char* ip, const c
   {
     return @"Wi-Fi: not connected";
   }
-  NSMutableString* text = [NSMutableString stringWithFormat:@"Wi-Fi: %d dBm", wifi->rssi];
+  NSMutableString* text = [NSMutableString stringWithFormat:@"%-15s%d dBm", "Wi-Fi:", wifi->rssi];
   if (ip[0] != 0)
   {
-    [text appendFormat:@"\nIP Address: %s", ip];
+    [text appendFormat:@"\n%-15s%s", "IP Address:", ip];
   }
   if (router[0] != 0)
   {
-    [text appendFormat:@"\nRouter: %s", router];
+    [text appendFormat:@"\n%-15s%s", "Router:", router];
   }
   if (mac[0] != 0)
   {
-    [text appendFormat:@"\nMAC Address: %s", mac];
+    [text appendFormat:@"\n%-15s%s", "MAC Address:", mac];
   }
   const char* security = SystemInfoWifiSecurityName(wifi->security);
   if (security != NULL)
   {
-    [text appendFormat:@"\nSecurity: %s", security];
+    [text appendFormat:@"\n%-15s%s", "Security:", security];
   }
-  [text appendFormat:@"\nChannel: %@\nNoise: %d dBm\nTx Rate: %.0f Mbps", WifiChannelText(wifi), wifi->noise, wifi->txRate];
+  [text appendFormat:@"\n%-15s%@\n%-15s%d dBm\n%-15s%.0f Mbps", "Channel:", WifiChannelText(wifi), "Noise:", wifi->noise,
+                     "Tx Rate:", wifi->txRate];
   const char* phy = SystemInfoWifiPhyName(wifi->phy);
   if (phy != NULL)
   {
-    [text appendFormat:@"\nPHY Mode: %s", phy];
+    [text appendFormat:@"\n%-15s%s", "PHY Mode:", phy];
   }
   return text;
 }

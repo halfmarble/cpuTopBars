@@ -42,7 +42,7 @@ Rest the pointer on a bar for a second and its reading shows below the menu bar.
 
 * **Wi-Fi:** while connected, the signal, then the IP address, router, MAC address, security, channel, noise, transmit rate and PHY mode; else whether Wi-Fi is off or not connected. In the picture the addresses are blacked out.
 
-<img src="screenshots/hover-wifi.png" width="264" alt="Wi-Fi label, addresses blacked out">
+<img src="screenshots/hover-wifi.png" width="274" alt="Wi-Fi label, addresses blacked out">
 
 * **Disk:** the startup volume's use, with its free and used space.
 
