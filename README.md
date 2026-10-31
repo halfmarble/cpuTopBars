@@ -38,7 +38,7 @@ Rest the pointer on a bar for a second and its reading shows below the menu bar.
 
 * **Battery:** the battery's charge, and whether it is charging, not charging, charged, or on battery, with the time left when macOS gives one.
 
-<img src="screenshots/hover-battery.png" width="298" alt="Battery label">
+<img src="screenshots/hover-battery.png" width="258" alt="Battery label">
 
 * **Wi-Fi:** while connected, the signal, then the IP address, router, MAC address, security, channel, noise, transmit rate and PHY mode; else whether Wi-Fi is off or not connected. In the picture the addresses are blacked out.
 
@@ -99,7 +99,7 @@ Two apps are coming to the Mac App Store: **cpuTopBars**, free, and **devTopBars
 | **Ending a process** | a Kill button for your own processes | none | Kill through a Shortcut you add once, or copy the process's name and open Activity Monitor |
 | **Neural Engine** | its busy share, where it can be read | on or off | on or off |
 | **GPU** | its use, and its power in watts where it can be read | its use | its use |
-| **Usage bars for an AI coding plan** | — | — | the plan's 5-hour and weekly limits, and one bar per live session, fed by a free open-source plugin |
+| **Usage bars for an AI coding plan** | — | — | the plan's 5-hour and weekly limits, lettered 5 and 7, and one bar per live session, fed by a free open-source plugin |
 | **IP addresses** | the Wi-Fi address and router, in the Wi-Fi bar's hover label | the same | the same, plus LAN, WAN and VPN rows in the menu; the WAN address is looked up only when you click its row |
 | **Keep Mac awake** | — | — | while a chosen process runs, from the inspector |
 | **Network use** | none | none | the WAN lookup when you click its row, and one check at launch for a newer plugin version, which you can turn off |
