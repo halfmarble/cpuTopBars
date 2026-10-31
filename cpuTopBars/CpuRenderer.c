@@ -697,13 +697,40 @@ static rgb _mix(rgb c, rgb to, double t)
   return m;
 }
 
+// the full battery's mark, a lightning bolt, as a path over the bar at x, width wide: 4.25 pt wide and 5.7 tall (its corners
+// traced from an 11 x 14-pixel icon at 2x), a little smaller on a bar narrower than that, centred across the bar and 1 pt
+// above the image's centre as the digits' stack is, its box's corner on a device pixel and then, at its own size, 0.125 pt
+// right and 0.15 pt up, where the icon has it (on a whole pixel, the band's edges would blend at 2x where the icon's are
+// sharp), so on the 6- and 8-pt bars it stands 0.25 pt right of centre: the icon's 11 pixels cannot be centred on whole
+// ones. Scaled down it keeps the device pixel, inside the bar. Its slanted edges blend, as the icon's do. The caller
+// releases the path
+static CGMutablePathRef _battery_bolt(CGFloat x, CGFloat width, CGFloat scale)
+{
+  // from its box's bottom left, clockwise from the top: a band slanting across the middle and a stroke tapering to each
+  // tip, the same shape turned half a turn
+  static const CGPoint corners[] = {{2.695, 5.7}, {3.2, 5.7}, {2.39, 3.39}, {4.25, 3.39}, {1.555, 0.0}, {1.05, 0.0}, {1.86, 2.31}, {0.0, 2.31}};
+  const CGFloat boltWidth = 4.25;
+  const CGFloat boltHeight = 5.7;
+  const CGFloat size = fmin(1.0, width/boltWidth);
+  const CGFloat dx = (size < 1.0) ? 0.0 : 0.125; // the icon's phase, only at its own size: scaled, it would pass the bar
+  const CGFloat dy = (size < 1.0) ? 0.0 : 0.15;
+  const CGFloat left = _snap(x + ((width - (size*boltWidth))/2.0), scale) + dx;
+  const CGFloat lowest = _snap((16.0 - (size*boltHeight))/2.0, scale) + 1.0 + dy;
+  const CGAffineTransform place = CGAffineTransformScale(CGAffineTransformMakeTranslation(left, lowest), size, size);
+  CGMutablePathRef bolt = CGPathCreateMutable();
+  CGPathAddLines(bolt, &place, corners, sizeof(corners)/sizeof(corners[0]));
+  CGPathCloseSubpath(bolt);
+  return bolt;
+}
+
 // the battery's bar at x, width wide, in style (CPU_RENDER_BATTERY_*; an unknown one as CPU_RENDER_BATTERY_LIGHT_TINT): its
 // background over the whole bar from bottom, then the fill in fill (at 0.9 opacity when neutral, on the adapter and not
 // charging), the charge's share of the height, its top on a device pixel, and over them the number: the charge in whole
 // percent, 0 to 99, its digits upright and stacked from the top, 5 pt tall, 1 pt apart, each centred across the bar on
 // whole points and the stack 1 pt above the image's centre, on device pixels, so the digits' edges are sharp. A full bar
-// (100) has no number: stacked, it would be 17 pt, taller than the dashed style's 14-pt bar. Each style's colours are
-// CPU_RENDER_BATTERY_*'s in CpuRenderer.h; a digit cut out lets the menu bar show through it. No number without the font
+// (100) has a lightning bolt in place of the number (_battery_bolt): stacked, "100" would be 17 pt, taller than the dashed
+// style's 14-pt bar. Each style's colours are CPU_RENDER_BATTERY_*'s in CpuRenderer.h, the bolt's the digits'; a digit
+// cut out lets the menu bar show through it. No number without the font; the bolt needs none
 static void _render_battery_bar(CGContextRef ctx, CGFloat x, CGFloat width, double charge, rgb fill, bool neutral, int style, CGFloat color, bool light, CGFloat bottom)
 {
   const double share = fmin(fmax(charge, 0.0), 1.0);
@@ -738,44 +765,48 @@ static void _render_battery_bar(CGContextRef ctx, CGFloat x, CGFloat width, doub
   const CGRect filled = CGRectMake(x, bottom, width, _snap(share*(16.0-bottom), scale));
   CGContextSetRGBFillColor(ctx, fill.r, fill.g, fill.b, neutral ? 0.9 : 1.0);
   CGContextFillRect(ctx, filled);
-  CTFontRef font = _battery_font();
-  if (font == NULL)
-  {
-    return;
-  }
   const long percent = lround(share*100.0);
+  CGMutablePathRef digits = NULL; // the digits, or at 100 the bolt
   if (percent >= 100)
   {
-    return;
+    digits = _battery_bolt(x, width, scale);
   }
-  char text[8];
-  const int count = snprintf(text, sizeof(text), "%ld", percent);
-  if ((count <= 0) || ((size_t)count >= sizeof(text)))
+  else
   {
-    return;
-  }
-  const CGFloat digit = 5.0;
-  const CGFloat step = digit + 1.0; // a digit and the gap after it
-  const CGFloat lowest = _snap((16.0 - ((count*digit) + ((count-1)*(step - digit))))/2.0, scale) + 1.0; // the last digit's bottom
-  CGMutablePathRef digits = CGPathCreateMutable();
-  for (int i=0; i<count; i++)
-  {
-    UniChar character = (UniChar)text[i];
-    CGGlyph glyph = 0;
-    if (!CTFontGetGlyphsForCharacters(font, &character, &glyph, 1))
+    CTFontRef font = _battery_font();
+    if (font == NULL)
     {
-      continue;
+      return;
     }
-    CGPathRef path = CTFontCreatePathForGlyph(font, glyph, NULL);
-    if (path == NULL)
+    char text[8];
+    const int count = snprintf(text, sizeof(text), "%ld", percent);
+    if ((count <= 0) || ((size_t)count >= sizeof(text)))
     {
-      continue;
+      return;
     }
-    const CGRect box = CGPathGetPathBoundingBox(path);
-    const CGAffineTransform place = CGAffineTransformMakeTranslation(x + floor((width - box.size.width)/2.0) - box.origin.x,
-                                                                     lowest + ((count-1-i)*step) - box.origin.y);
-    CGPathAddPath(digits, &place, path);
-    CGPathRelease(path);
+    const CGFloat digit = 5.0;
+    const CGFloat step = digit + 1.0; // a digit and the gap after it
+    const CGFloat lowest = _snap((16.0 - ((count*digit) + ((count-1)*(step - digit))))/2.0, scale) + 1.0; // the last digit's bottom
+    digits = CGPathCreateMutable();
+    for (int i=0; i<count; i++)
+    {
+      UniChar character = (UniChar)text[i];
+      CGGlyph glyph = 0;
+      if (!CTFontGetGlyphsForCharacters(font, &character, &glyph, 1))
+      {
+        continue;
+      }
+      CGPathRef path = CTFontCreatePathForGlyph(font, glyph, NULL);
+      if (path == NULL)
+      {
+        continue;
+      }
+      const CGRect box = CGPathGetPathBoundingBox(path);
+      const CGAffineTransform place = CGAffineTransformMakeTranslation(x + floor((width - box.size.width)/2.0) - box.origin.x,
+                                                                       lowest + ((count-1-i)*step) - box.origin.y);
+      CGPathAddPath(digits, &place, path);
+      CGPathRelease(path);
+    }
   }
   CGContextSaveGState(ctx);
   if ((style == CPU_RENDER_BATTERY_LIGHT_TINT) && light && !neutral)

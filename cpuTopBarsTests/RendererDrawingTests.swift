@@ -205,22 +205,73 @@ extension FreeTests {
       return r
     }
 
-    @Test(arguments: [Int32(0), 1, 2, 3])
-    func batteryFullOnTheAdapterIsWhiteWithNoNumber(style: Int32) {
-      #expect(Self.batteryFont)
-      let image = render(bar: true, stripped: true, width: 120, readings: batteryReadings(1.0, onAC: true, style: style))
+    // the bolt's cut-out area in points at scale: each pixel of the bar's columns from height 2 up counts the share of its
+    // alpha missing against the full bar's, read at height 3, below the bolt (the full fill is the same on every row)
+    private func batteryBoltArea(_ image: Bitmap, scale: Int, columns: Int) -> Double {
+      var area = 0.0
+      let full = Double(image.alpha(x: 0, y: 3 * scale))
+      for y in (2 * scale)..<(16 * scale) {
+        for x in 0..<(columns * scale) { area += (full - Double(image.alpha(x: x, y: y))) / full }
+      }
+      return area / Double(scale * scale)
+    }
+
+    @Test(arguments: [Int32(0), 1, 2, 3], [1, 2])
+    func batteryFullOnTheAdapterIsWhiteWithACutOutBolt(style: Int32, scale: Int) {
+      let image = render(bar: true, stripped: true, width: 120, readings: batteryReadings(1.0, onAC: true, style: style), scale: scale)
       // the fill, white at 0.9 opacity over the background (about 238 over the tint style's, about 245 over the greys' and
-      // the light tint's), on every row from 2 up, the dash rows included; at 100 no number, so nothing is cut out and nothing
-      // stands below the bar, in any style
-      for x in 0..<8 {
-        let column = image.column(x)
-        #expect(column[0] == 0 && column[1] == 0, "below DASHED_BOTTOM, column \(x)")
-        for y in 2..<16 { #expect(column[y] > 200, "column \(x), height \(y): \(column[y])") }
-        #expect(image.red(x: x, y: 8) == image.green(x: x, y: 8))
+      // the light tint's), on every row from 2 up, the dash rows included, except the bolt cut out of it in every style: its
+      // box at x = 2.125 to 6.375 and heights 6.15 to 11.85 (the 16 - 5.7 centred snaps to 5, raised 1, then the icon's
+      // 0.125 and 0.15). Columns 0, 1 and 7 and the rows below 6 and from 12 up hold none of it; the band across its middle,
+      // heights 8.5 to 9 and x = 3 to 5, is all cut out at 2x, and at 1x its row 8 is mostly cut out at x = 3 and 4. At
+      // 2x, heights 11 to 11.5, the upper stroke, which leans right as the icon's does, holds x = 4.5 to 5 and not 3 to 3.5
+      // (a bolt mirrored across would hold the second). Nothing stands below the bar
+      for x in [0, 1, 7].flatMap({ ($0 * scale)..<(($0 + 1) * scale) }) {
+        for y in (2 * scale)..<(16 * scale) { #expect(image.alpha(x: x, y: y) > 200, "style \(style), scale \(scale), column \(x), height \(y)") }
+      }
+      for y in Array((2 * scale)..<(6 * scale)) + Array((12 * scale)..<(16 * scale)) {
+        for x in 0..<(8 * scale) { #expect(image.alpha(x: x, y: y) > 200, "style \(style), scale \(scale), pixel \(x), \(y)") }
+      }
+      if scale == 2 {
+        for x in 6..<10 { #expect(image.alpha(x: x, y: 17) == 0, "style \(style), band pixel \(x)") }
+        #expect(image.alpha(x: 9, y: 22) < 32 && image.alpha(x: 6, y: 22) > 200,
+                "style \(style), upper stroke: \(image.alpha(x: 9, y: 22)) at x 9, \(image.alpha(x: 6, y: 22)) at x 6")
+      } else {
+        for x in [3, 4] { #expect(image.alpha(x: x, y: 8) < 128, "style \(style), band pixel \(x): \(image.alpha(x: x, y: 8))") }
+      }
+      // the bolt's area, 8.37 pt² by its corners (the shoelace formula)
+      let area = batteryBoltArea(image, scale: scale, columns: 8)
+      #expect(abs(area - 8.37) < 0.4, "style \(style), scale \(scale), bolt area \(area)")
+      for x in 0..<(8 * scale) {
+        for y in 0..<(2 * scale) { #expect(image.alpha(x: x, y: y) == 0, "below the bar, scale \(scale), \(x), \(y)") }
       }
       // the readings' gap after the bar: the slot ends at 10, where disk's background starts
-      for x in 8..<10 { #expect(image.column(x).allSatisfy { $0 == 0 }, "gap column \(x)") }
-      #expect(image.column(10)[2] > 0)
+      for x in (8 * scale)..<(10 * scale) { #expect(image.column(x).allSatisfy { $0 == 0 }, "gap column \(x)") }
+      #expect(image.column(10 * scale)[2 * scale] > 0)
+    }
+
+    @Test func batteryFullBoltShrinksOnAThinBar() {
+      // Thin: tickWidth 2, so the battery's bar is 4 pt wide, under the bolt's 4.25: the bolt drawn at 4 / 4.25 of its size,
+      // its area 8.37 x 0.886 = 7.41 pt², inside the bar (the slot's gap after it, from 4, stays clear)
+      let image = render(bar: true, stripped: true, width: 120, readings: batteryReadings(1.0, onAC: true, style: 1), scale: 2,
+                         tickWidth: 2, tickTotalWidth: 3)
+      let area = batteryBoltArea(image, scale: 2, columns: 4)
+      #expect(abs(area - 7.41) < 0.4, "bolt area \(area)")
+      #expect(image.column(8).allSatisfy { $0 == 0 }, "the gap after the thin bar")
+      // drawn, not cut out (the light tint on a light bar, on battery: black), it stays inside the bar too
+      let black = render(bar: true, stripped: true, width: 120, readings: batteryReadings(1.0, style: 0), light: true, scale: 2,
+                         tickWidth: 2, tickTotalWidth: 3)
+      for x in 8..<10 { #expect(black.column(x).allSatisfy { $0 == 0 }, "the gap after the thin bar, black bolt, column \(x)") }
+    }
+
+    @Test func batteryFullLightTintOnALightBarHasABlackBolt() {
+      // light menu bar, on battery: the bolt, as the digits, black at 0.9 opacity over the red fill, none cut out (2x, the
+      // band's pixels at height 8.5 to 9, x = 3 to 5)
+      let image = render(bar: true, stripped: true, width: 120, readings: batteryReadings(1.0, style: 0), light: true, scale: 2)
+      for x in 6..<10 {
+        #expect(image.alpha(x: x, y: 17) == 255 && image.red(x: x, y: 17) < 40, "band pixel \(x): red \(image.red(x: x, y: 17))")
+      }
+      #expect(image.red(x: 0, y: 17) == 255, "the red fill beside it")
     }
 
     // the device rows of a two-digit number at scale: the lower digit's, the upper digit's, and the rows beside them that
