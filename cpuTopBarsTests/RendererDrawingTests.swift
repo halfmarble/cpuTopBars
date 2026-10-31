@@ -708,5 +708,76 @@ extension FreeTests {
         }
       }
     }
+
+    @Test func extraReadingsTakeTheirOwnLetters() {
+      // five extra readings at the image's right edge, after the block and the core bar: a wide one lettered 5, a wide one
+      // lettered 7 and not read (its letter drawn all the same, as the battery's B is), a wide one with no letter, a wide one
+      // lettered X, which has no bitmap, and a narrow one lettered 5, whose slot is too tight. 5 and 7 are drawn as their 5 x 5
+      // bitmaps at x + 1 (1x, 8-pt bars), white; the other three draw nothing in the band
+      func extra(_ value: Double, _ letter: Character?, narrow: Bool = false) -> CpuExtraReading {
+        var e = CpuExtraReading()
+        e.value = value
+        e.narrow = narrow
+        e.letter = letter.map { CChar(bitPattern: $0.asciiValue!) } ?? 0
+        return e
+      }
+      let extras = [extra(1.0, "5"), extra(-1.0, "7"), extra(1.0, nil), extra(1.0, "X"), extra(1.0, "5", narrow: true)]
+      var r = readings(disk: 1.0)
+      r.letters = true
+      let width = 140
+      let image = render(bar: true, stripped: false, width: width, readings: r, extra: extras, height: 26)
+      let shown = CpuRenderReadingsShown(&r)
+      let base = Int(CpuRenderReadingsCount(shown))
+      let xs: [Int] = extras.withUnsafeBufferPointer { e in
+        (0..<extras.count).map { i in
+          Int(CpuRenderReadingX(true, 4, 6, shown, CGFloat(width), 0, 1, Int32(extras.count), e.baseAddress, Int32(base + i)))
+        }
+      }
+      let digits: [(String, [String])] = [
+        ("5", ["#####", "#....", "####.", "....#", "####."]),
+        ("7", ["#####", "....#", "...#.", "..#..", "..#.."]),
+      ]
+      for (i, (name, rows)) in digits.enumerated() {
+        let x = xs[i] + 1
+        let drawn = (0..<5).map { row in
+          String((0..<5).map { column in image.alpha(x: x + column, y: 4 - row) > 200 ? "#" : "." })
+        }
+        #expect(drawn == rows, "\(name) at x \(x): \(drawn)")
+        for y in 0..<5 {
+          #expect(image.alpha(x: x - 1, y: y) == 0 && image.alpha(x: x + 5, y: y) == 0, "\(name): clear beside it, height \(y)")
+          for column in x..<(x + 5) where image.alpha(x: column, y: y) > 200 {
+            #expect(image.red(x: column, y: y) == image.alpha(x: column, y: y), "\(name): white, column \(column), height \(y)")
+          }
+        }
+      }
+      // no letter, X and the narrow one: the band under them, from the third extra's bar to the image's right edge, is clear
+      for x in xs[2]..<width {
+        #expect((0..<5).allSatisfy { image.alpha(x: x, y: $0) == 0 }, "no letter, column \(x)")
+      }
+    }
+
+    @Test func extraLettersOnlyWithTheBlockLetters() {
+      // an extra reading's letter is one of the block's letters: none without them (letters false) and none when the block
+      // is not drawn (extraOnly), where the image stays 16 pt and the bar, not read, is its background alone (alpha about
+      // 76), so no pixel of its column reaches a letter's 0.9 opacity
+      var e = CpuExtraReading()
+      e.value = -1.0
+      e.letter = CChar(bitPattern: Character("5").asciiValue!)
+      let width = 60
+      for extraOnly in [false, true] {
+        var r = readings(disk: 1.0)
+        r.letters = extraOnly   // without the block, asked for and still not drawn
+        r.extraOnly = extraOnly
+        #expect(CpuRenderImageHeight(true, false, &r) == 16)
+        let image = render(bar: true, stripped: false, width: width, readings: r, extra: [e])
+        let shown = CpuRenderReadingsShown(&r)
+        let x = [e].withUnsafeBufferPointer { p in
+          Int(CpuRenderReadingX(true, 4, 6, shown, CGFloat(width), 0, 1, 1, p.baseAddress, CpuRenderReadingsCount(shown)))
+        }
+        for column in x..<(x + 8) {
+          #expect((0..<16).allSatisfy { image.alpha(x: column, y: $0) < 200 }, "extraOnly \(extraOnly), column \(column)")
+        }
+      }
+    }
   }
 }

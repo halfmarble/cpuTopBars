@@ -3067,9 +3067,9 @@ NSView* MenuRowsHelpExample(const CpuReadings* readings, const double* coreLoads
 - (void)renderMenubarWithLight:(BOOL)light readings:(const CpuReadings*)readings
 {
   CpuSamplerUpdate(&cpu_info);
-  // the menu bar's image has the block's letters under its bars while Settings' "Show letters under the bars" is on, and is
-  // then taller (CpuRenderImageHeight); not at the Thin width, whose 5-pt slots leave no room between the 5-pt letters; the
-  // Settings previews and the help's examples draw without them
+  // the menu bar's image has the block's letters under its bars, and the extra bars' own (barLetters) under theirs, while
+  // Settings' "Show letters under the bars" is on, and is then taller (CpuRenderImageHeight); not at the Thin width, whose
+  // 5-pt slots leave no room between the 5-pt letters; the Settings previews and the help's examples draw without them
   CpuReadings lettered = {};
   if (readings != NULL)
   {
@@ -4016,6 +4016,7 @@ static bool BarTipIsWifi(void)
     NSArray<NSNumber*>* paces = [rows respondsToSelector:@selector(barPaces)] ? [rows barPaces] : nil;
     NSArray<NSNumber*>* starts = [rows respondsToSelector:@selector(barGroupStarts)] ? [rows barGroupStarts] : nil;
     NSArray<NSNumber*>* narrows = [rows respondsToSelector:@selector(barNarrows)] ? [rows barNarrows] : nil;
+    NSArray<NSString*>* letters = [rows respondsToSelector:@selector(barLetters)] ? [rows barLetters] : nil;
     for (NSUInteger item=0; item<values.count; item++)
     {
       NSNumber* value = values[item];
@@ -4026,6 +4027,7 @@ static bool BarTipIsWifi(void)
       NSNumber* pace = (item < paces.count) ? paces[item] : nil;
       NSNumber* start = (item < starts.count) ? starts[item] : nil;
       NSNumber* narrow = (item < narrows.count) ? narrows[item] : nil;
+      NSString* letter = (item < letters.count) ? letters[item] : nil;
       CpuExtraReading reading = {};
       reading.value = [value isKindOfClass:[NSNumber class]] ? value.doubleValue : -1.0;
       reading.mark = [mark isKindOfClass:[NSNumber class]] ? mark.doubleValue : 0.0;
@@ -4042,6 +4044,9 @@ static bool BarTipIsWifi(void)
       reading.pace = [pace isKindOfClass:[NSNumber class]] ? pace.doubleValue : 0.0;
       reading.groupStart = [start isKindOfClass:[NSNumber class]] ? start.boolValue : false;
       reading.narrow = [narrow isKindOfClass:[NSNumber class]] ? narrow.boolValue : false;
+      // one ASCII character, which the renderer draws when it has its bitmap; anything else is none
+      const bool oneCharacter = [letter isKindOfClass:[NSString class]] && (letter.length == 1) && ([letter characterAtIndex:0] < 0x80);
+      reading.letter = oneCharacter ? (char)[letter characterAtIndex:0] : 0;
       if ((item == 0) && !extraBars.empty())
       {
         reading.groupStart = true; // bars of another class come before it

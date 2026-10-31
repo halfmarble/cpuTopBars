@@ -129,6 +129,11 @@ NS_ASSUME_NONNULL_BEGIN
 // not change); NO, an entry that is not a number or a missing entry: twice as wide,
 // as the app's own readings. Read with barReadings, at each tick of the graph
 - (NSArray<NSNumber*>*)barNarrows;
+// each bar's letter, in the same order as barReadings: an NSString of one character, one of B W D M N G C E P 5 7, drawn
+// under a wide bar (not barNarrows) in the band of the app's own letters, while Settings' "Show letters under the bars"
+// is on and the app's own bars are shown; any other entry, a missing entry or a narrow bar: none. Read with barReadings,
+// at each tick of the graph
+- (NSArray<NSString*>*)barLetters;
 @end
 
 __BEGIN_DECLS

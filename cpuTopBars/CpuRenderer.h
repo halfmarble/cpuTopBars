@@ -144,6 +144,10 @@ struct CpuExtraReading
   // true: this reading is drawn as a core bar, as wide as the tickWidth given and in a core bar's slot (tickTotalWidth);
   // false is the default: twice as wide, in the readings' slot. Dot style does not change
   bool narrow;
+  // the letter drawn under this reading's bar with the block's letters (CpuReadings letters), in the same 5 x 5 pixel
+  // style: one of B W D M N G C E P 5 7. Only under a wide bar (not narrow); any other value, 0 the default, draws none,
+  // so a zeroed struct has none
+  char letter;
 } typedef CpuExtraReading;
 
 // each 0..1; below 0, not read: only the bar's background is drawn, and in Dot style nothing
@@ -209,7 +213,8 @@ struct CpuReadings
   // bars' background opacity. Drawn only with wifiShown
   double wifi;
   // true: in bar style, a letter under each of the block's wide bars, B the battery's, W Wi-Fi's, D disk, M memory, N the
-  // Neural Engine's, G the GPU's, C CPU, E the E-cores' and P the P-cores', in the band at the image's bottom
+  // Neural Engine's, G the GPU's, C CPU, E the E-cores' and P the P-cores', and under each wide extra reading its own
+  // letter (CpuExtraReading letter), in the band at the image's bottom
   // (CPU_RENDER_LETTERS_HEIGHT), and everything else drawn above it, the bars 3 pt over the letters in either style; the
   // image must be CpuRenderImageHeight tall. false is the default, so a zeroed struct draws the 16-pt image as before.
   // Ignored when the block is not drawn and in Dot style
