@@ -205,73 +205,123 @@ extension FreeTests {
       return r
     }
 
-    // the bolt's cut-out area in points at scale: each pixel of the bar's columns from height 2 up counts the share of its
-    // alpha missing against the full bar's, read at height 3, below the bolt (the full fill is the same on every row)
-    private func batteryBoltArea(_ image: Bitmap, scale: Int, columns: Int) -> Double {
+    // the battery at 100% in each power state: on battery, charging, and on the adapter and not charging
+    private static let fullStates: [(name: String, charging: Bool, onAC: Bool)] =
+      [("battery", false, false), ("charging", true, true), ("adapter", false, true)]
+
+    // the bolt's coverage of the pixel at x, y: the share of the way its green has gone from the fill's, read at height 3,
+    // below the bolt (the full fill is the same on every row), to the bolt's own, 255 white or 0 black, opaque. The fill's
+    // green is 189 or more from either in every state and style (measured, dark: 238 to 245 on the adapter by style, 209
+    // charging, 66 on battery; light: 0 to 4, 199, 56)
+    private func batteryBoltCoverage(_ image: Bitmap, scale: Int, white: Bool, x: Int, y: Int) -> Double {
+      let fill = Double(image.green(x: 0, y: 3 * scale))
+      return (Double(image.green(x: x, y: y)) - fill) / ((white ? 255.0 : 0.0) - fill)
+    }
+
+    // the bolt's area in points at scale: its coverage summed over the bar's columns from height 2 up to the cap's row, 15
+    private func batteryBoltArea(_ image: Bitmap, scale: Int, columns: Int, white: Bool) -> Double {
       var area = 0.0
-      let full = Double(image.alpha(x: 0, y: 3 * scale))
-      for y in (2 * scale)..<(16 * scale) {
-        for x in 0..<(columns * scale) { area += (full - Double(image.alpha(x: x, y: y))) / full }
+      for y in (2 * scale)..<(15 * scale) {
+        for x in 0..<(columns * scale) { area += batteryBoltCoverage(image, scale: scale, white: white, x: x, y: y) }
       }
       return area / Double(scale * scale)
     }
 
     @Test(arguments: [Int32(0), 1, 2, 3], [1, 2])
-    func batteryFullOnTheAdapterIsWhiteWithACutOutBolt(style: Int32, scale: Int) {
-      let image = render(bar: true, stripped: true, width: 120, readings: batteryReadings(1.0, onAC: true, style: style), scale: scale)
-      // the fill, white at 0.9 opacity over the background (about 238 over the tint style's, about 245 over the greys' and
-      // the light tint's), on every row from 2 up, the dash rows included, except the bolt cut out of it in every style: its
-      // box at x = 2.125 to 6.375 and heights 6.15 to 11.85 (the 16 - 5.7 centred snaps to 5, raised 1, then the icon's
-      // 0.125 and 0.15). Columns 0, 1 and 7 and the rows below 6 and from 12 up hold none of it; the band across its middle,
-      // heights 8.5 to 9 and x = 3 to 5, is all cut out at 2x, and at 1x its row 8 is mostly cut out at x = 3 and 4. At
-      // 2x, heights 11 to 11.5, the upper stroke, which leans right as the icon's does, holds x = 4.5 to 5 and not 3 to 3.5
-      // (a bolt mirrored across would hold the second). Nothing stands below the bar
-      for x in [0, 1, 7].flatMap({ ($0 * scale)..<(($0 + 1) * scale) }) {
-        for y in (2 * scale)..<(16 * scale) { #expect(image.alpha(x: x, y: y) > 200, "style \(style), scale \(scale), column \(x), height \(y)") }
+    func batteryFullBoltIsSolidInEveryStateAndStyle(style: Int32, scale: Int) {
+      // at 100% the fill covers the bar in every style, and the bolt is drawn over it solid, at full opacity, in every power
+      // state: white on battery's red and on the light menu bar's black adapter fill, black on charging's green and on the
+      // dark menu bar's white one. Its box at x = 2.125 to 6.375 and heights 6.15 to 11.85 (the 16 - 5.7 centred snaps to 5,
+      // raised 1, then the icon's 0.125 and 0.15), so columns 0, 1 and 7 and the rows from 2 to 5 and from 12 to 14 are the
+      // fill alone, pixel for pixel. The band across its middle, heights 8.5 to 9 and x = 3 to 5, is all bolt at 2x: opaque
+      // in the bolt's colour; at 1x its row 8 is mostly bolt at x = 3 and 4. At 2x, heights 11 to 11.5, the upper stroke,
+      // which leans right as the icon's does, holds x = 4.5 to 5 and not 3 to 3.5 (a bolt mirrored across would hold the
+      // second). Its area by its coverage is 8.37 pt² by its corners (the shoelace formula). Nothing stands below the bar or
+      // in the gap after it
+      for light in [false, true] {
+        for state in Self.fullStates {
+          let white = !state.charging && (!state.onAC || light)
+          let image = render(bar: true, stripped: true, width: 120,
+                             readings: batteryReadings(1.0, charging: state.charging, onAC: state.onAC, style: style), light: light, scale: scale)
+          let label = "style \(style), scale \(scale), light \(light), \(state.name)"
+          let fill = image.pixel(x: 0, y: 3 * scale)
+          for x in [0, 1, 7].flatMap({ ($0 * scale)..<(($0 + 1) * scale) }) {
+            for y in (2 * scale)..<(15 * scale) { #expect(image.pixel(x: x, y: y) == fill, "\(label), column \(x), height \(y)") }
+          }
+          for y in Array((2 * scale)..<(6 * scale)) + Array((12 * scale)..<(15 * scale)) {
+            for x in 0..<(8 * scale) { #expect(image.pixel(x: x, y: y) == fill, "\(label), pixel \(x), \(y)") }
+          }
+          if scale == 2 {
+            let bolt: UInt8 = white ? 255 : 0
+            for x in 6..<10 {
+              let p = image.pixel(x: x, y: 17)
+              #expect(p == [bolt, bolt, bolt, 255], "\(label), band pixel \(x): \(p)")
+            }
+            let right = batteryBoltCoverage(image, scale: 2, white: white, x: 9, y: 22)
+            let left = batteryBoltCoverage(image, scale: 2, white: white, x: 6, y: 22)
+            #expect(right > 0.875 && left < 0.125, "\(label), upper stroke: \(right) at x 9, \(left) at x 6")
+          } else {
+            for x in [3, 4] {
+              let c = batteryBoltCoverage(image, scale: 1, white: white, x: x, y: 8)
+              #expect(c > 0.5, "\(label), band pixel \(x): \(c)")
+            }
+          }
+          let area = batteryBoltArea(image, scale: scale, columns: 8, white: white)
+          #expect(abs(area - 8.37) < 0.4, "\(label), bolt area \(area)")
+          for x in 0..<(8 * scale) {
+            for y in 0..<(2 * scale) { #expect(image.alpha(x: x, y: y) == 0, "\(label), below the bar, \(x), \(y)") }
+          }
+          // the readings' gap after the bar: the slot ends at 10, where disk's background starts
+          for x in (8 * scale)..<(10 * scale) { #expect(image.column(x).allSatisfy { $0 == 0 }, "\(label), gap column \(x)") }
+          #expect(image.column(10 * scale)[2 * scale] > 0)
+        }
       }
-      for y in Array((2 * scale)..<(6 * scale)) + Array((12 * scale)..<(16 * scale)) {
-        for x in 0..<(8 * scale) { #expect(image.alpha(x: x, y: y) > 200, "style \(style), scale \(scale), pixel \(x), \(y)") }
+    }
+
+    @Test(arguments: [Int32(0), 1, 2, 3], [1, 2])
+    func batteryCapCutsTheTopCorners(style: Int32, scale: Int) {
+      // every battery bar's top 1 pt, height 15 to 16, is cleared but for its middle half, each cut a quarter of the width
+      // on a device pixel: the Thick 8-pt bar's 2 pt, the Standard 6-pt's 1.5 (2 at 1x), the Thin 4-pt's 1. At every charge,
+      // full (the bolt), 62 and 20 (the digits) and not read (the background alone), in the solid and the dashed styles, in
+      // each power state, on either menu bar. Without digits the cut columns are drawn at height 14: the cap is 1 pt tall
+      for (tick, cut) in [(CGFloat(4), 2 * scale), (3, scale == 2 ? 3 : 2), (2, scale)] {
+        let width = Int(2 * tick) * scale
+        for charge in [1.0, 0.62, 0.2, -1] {
+          for stripped in [false, true] {
+            for light in [false, true] {
+              for state in Self.fullStates {
+                let image = render(bar: true, stripped: stripped, width: 120,
+                                   readings: batteryReadings(charge, charging: state.charging, onAC: state.onAC, style: style),
+                                   light: light, scale: scale, tickWidth: tick, tickTotalWidth: tick + 2)
+                let label = "style \(style), scale \(scale), width \(Int(2 * tick)), charge \(charge), stripped \(stripped), light \(light), \(state.name)"
+                for x in 0..<width {
+                  let corner = (x < cut) || (x >= width - cut)
+                  for y in (15 * scale)..<(16 * scale) {
+                    let a = image.alpha(x: x, y: y)
+                    #expect(corner ? (a == 0) : (a > 0), "\(label), pixel \(x), \(y): \(a)")
+                  }
+                  if corner && (charge == 1.0 || charge < 0) {
+                    #expect(image.alpha(x: x, y: (15 * scale) - 1) > 0, "\(label), below the cap, column \(x)")
+                  }
+                }
+              }
+            }
+          }
+        }
       }
-      if scale == 2 {
-        for x in 6..<10 { #expect(image.alpha(x: x, y: 17) == 0, "style \(style), band pixel \(x)") }
-        #expect(image.alpha(x: 9, y: 22) < 32 && image.alpha(x: 6, y: 22) > 200,
-                "style \(style), upper stroke: \(image.alpha(x: 9, y: 22)) at x 9, \(image.alpha(x: 6, y: 22)) at x 6")
-      } else {
-        for x in [3, 4] { #expect(image.alpha(x: x, y: 8) < 128, "style \(style), band pixel \(x): \(image.alpha(x: x, y: 8))") }
-      }
-      // the bolt's area, 8.37 pt² by its corners (the shoelace formula)
-      let area = batteryBoltArea(image, scale: scale, columns: 8)
-      #expect(abs(area - 8.37) < 0.4, "style \(style), scale \(scale), bolt area \(area)")
-      for x in 0..<(8 * scale) {
-        for y in 0..<(2 * scale) { #expect(image.alpha(x: x, y: y) == 0, "below the bar, scale \(scale), \(x), \(y)") }
-      }
-      // the readings' gap after the bar: the slot ends at 10, where disk's background starts
-      for x in (8 * scale)..<(10 * scale) { #expect(image.column(x).allSatisfy { $0 == 0 }, "gap column \(x)") }
-      #expect(image.column(10 * scale)[2 * scale] > 0)
     }
 
     @Test func batteryFullBoltShrinksOnAThinBar() {
       // Thin: tickWidth 2, so the battery's bar is 4 pt wide, under the bolt's 4.25: the bolt drawn at 4 / 4.25 of its size,
-      // its area 8.37 x 0.886 = 7.41 pt², inside the bar (the slot's gap after it, from 4, stays clear)
-      let image = render(bar: true, stripped: true, width: 120, readings: batteryReadings(1.0, onAC: true, style: 1), scale: 2,
-                         tickWidth: 2, tickTotalWidth: 3)
-      let area = batteryBoltArea(image, scale: 2, columns: 4)
-      #expect(abs(area - 7.41) < 0.4, "bolt area \(area)")
-      #expect(image.column(8).allSatisfy { $0 == 0 }, "the gap after the thin bar")
-      // drawn, not cut out (the light tint on a light bar, on battery: black), it stays inside the bar too
-      let black = render(bar: true, stripped: true, width: 120, readings: batteryReadings(1.0, style: 0), light: true, scale: 2,
-                         tickWidth: 2, tickTotalWidth: 3)
-      for x in 8..<10 { #expect(black.column(x).allSatisfy { $0 == 0 }, "the gap after the thin bar, black bolt, column \(x)") }
-    }
-
-    @Test func batteryFullLightTintOnALightBarHasABlackBolt() {
-      // light menu bar, on battery: the bolt, as the digits, black at 0.9 opacity over the red fill, none cut out (2x, the
-      // band's pixels at height 8.5 to 9, x = 3 to 5)
-      let image = render(bar: true, stripped: true, width: 120, readings: batteryReadings(1.0, style: 0), light: true, scale: 2)
-      for x in 6..<10 {
-        #expect(image.alpha(x: x, y: 17) == 255 && image.red(x: x, y: 17) < 40, "band pixel \(x): red \(image.red(x: x, y: 17))")
+      // its area 8.37 x 0.886 = 7.41 pt², inside the bar (the slot's gap after it, from 4, stays clear), black on the
+      // adapter's white and white on the battery's red
+      for (onAC, white) in [(true, false), (false, true)] {
+        let image = render(bar: true, stripped: true, width: 120, readings: batteryReadings(1.0, onAC: onAC, style: 1), scale: 2,
+                           tickWidth: 2, tickTotalWidth: 3)
+        let area = batteryBoltArea(image, scale: 2, columns: 4, white: white)
+        #expect(abs(area - 7.41) < 0.4, "white \(white), bolt area \(area)")
+        for x in 8..<10 { #expect(image.column(x).allSatisfy { $0 == 0 }, "white \(white), the gap after the thin bar, column \(x)") }
       }
-      #expect(image.red(x: 0, y: 17) == 255, "the red fill beside it")
     }
 
     // the device rows of a two-digit number at scale: the lower digit's, the upper digit's, and the rows beside them that
@@ -352,7 +402,7 @@ extension FreeTests {
         #expect(columns.allSatisfy { image.alpha(x: $0, y: y) <= 200 }, "scale \(scale), clear row \(y)")
       }
       for x in [0, 1, 6, 7].flatMap({ ($0 * scale)..<(($0 + 1) * scale) }) {
-        for y in (4 * scale)..<(16 * scale) {
+        for y in (4 * scale)..<(15 * scale) {   // height 15 is the cap's (batteryCapCutsTheTopCorners)
           #expect(abs(Int(image.alpha(x: x, y: y)) - 97) <= 2, "scale \(scale), column \(x), height \(y)")
         }
       }
@@ -392,7 +442,10 @@ extension FreeTests {
       for x in 0..<8 {
         let column = image.column(x)
         #expect(column[0] == 0 && column[1] == 0)
-        for y in 2..<16 { #expect(column[y] > 0 && column[y] < 127, "column \(x), height \(y): \(column[y])") }
+        for y in 2..<15 { #expect(column[y] > 0 && column[y] < 127, "column \(x), height \(y): \(column[y])") }
+        // the cap: height 15 cleared at the corners, x = 0, 1, 6 and 7
+        let corner = (x < 2) || (x >= 6)
+        #expect(corner ? (column[15] == 0) : (column[15] > 0 && column[15] < 127), "column \(x), height 15: \(column[15])")
       }
     }
 

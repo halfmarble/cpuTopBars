@@ -185,8 +185,10 @@ struct CpuReadings
   // the battery's charge, 0..1 (above 1 as 1); below 0, not read: the bars' background only, no number, and in Dot style
   // nothing. In bar style a wide bar, whole, without the dashes: its background in batteryStyle and a fill of that share
   // of its height, its top on a device pixel, and over it the charge in whole percent in CPU_RENDER_BATTERY_FONT (at 100
-  // a lightning bolt in its place), its digits upright and stacked from the top on device pixels, drawn as batteryStyle says; in Dot style a dot
-  // filled while the charge is 0.005 or more, with no number. Drawn only with batteryShown
+  // a lightning bolt in its place, solid, black on a light fill and white on a dark one, in every style), its digits upright
+  // and stacked from the top on device pixels, drawn as batteryStyle says; its top 1 pt cut away but for the middle half, a
+  // battery's cap, read or not. In Dot style a dot filled while the charge is 0.005 or more, with no number. Drawn only with
+  // batteryShown
   double battery;
   // the power state, which colours the fill, or in Dot style the dot: charging, systemGreen at full opacity; else on the
   // adapter (batteryOnAC: charged, or held below full, and not charging), the menu bar's text colour at 0.9 opacity, white
