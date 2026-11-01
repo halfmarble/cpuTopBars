@@ -83,7 +83,7 @@ enum Theme
 // CoreText), so the digits are 5 pt tall and 3 pt wide ("1" 2 pt)
 #define CPU_RENDER_BATTERY_FONT "Micro5-Regular"
 #define CPU_RENDER_BATTERY_FONT_SIZE (11.0)
-// the battery bar's styles (CpuReadings batteryStyle), each over the bar's whole height in bar style, its fill on a device
+// the battery bar's styles (CpuReadings batteryStyle), each over the bar above the fill in bar style (none under it), its fill on a device
 // pixel; an unknown style draws as CPU_RENDER_BATTERY_LIGHT_TINT, the default, which a zeroed struct draws.
 // LIGHT_TINT: the fill's colour mixed 55% toward white, opaque (on the adapter the bars' grey at 0.55 opacity); the digits
 // cut out, so the menu bar shows through them, except on a light menu bar with a coloured fill (charging or on battery),
@@ -91,6 +91,7 @@ enum Theme
 // GREY and LIGHT_GREY: the bars' grey at 0.60 and 0.75 opacity; the digits cut out.
 // TINT: the fill's colour at 0.38 opacity (0.3 on the adapter); the digits cut out of the fill, and above it in the fill's
 // colour mixed 60% toward white (45% toward black on a light menu bar), on the adapter the text colour at 0.9 opacity
+// alone, the digits cut out above the fill too
 #define CPU_RENDER_BATTERY_LIGHT_TINT (0)
 #define CPU_RENDER_BATTERY_GREY (1)
 #define CPU_RENDER_BATTERY_LIGHT_GREY (2)
@@ -195,7 +196,8 @@ struct CpuReadings
   // batteryShown
   double battery;
   // the power state, which colours the fill, or in Dot style the dot: charging, systemGreen at full opacity; else on the
-  // adapter (batteryOnAC: charged, or held below full, and not charging), the menu bar's text colour at 0.9 opacity, white
+  // adapter (batteryOnAC: charged, or held below full, and not charging), the menu bar's text colour at 0.9 opacity (in bar
+  // style alone, with no background under it, as bright as the system's icons on a dark menu bar), white
   // on a dark menu bar and black on a light one; else on battery, systemRed at full opacity, as a zeroed struct draws it.
   // Drawn only with batteryShown
   bool batteryCharging;

@@ -606,7 +606,7 @@ static rgb _text_color(bool light)
 // the Neural Engine's reading in its readings slot at x; not read (state below 0), nothing. In bar style a wide bar, as
 // the readings' are, drawn whole from bottom, without the dashes: on (above 0), filled solid in the menu bar's text
 // colour at 0.9 opacity, the brightness of the system's Wi-Fi icon and clock over the dark menu bar (232-233 of 255
-// over its 32, measured on screen; the battery's body reads 243); off (0), only the bars' background. In Dot style the readings' dot, where theirs is drawn: on,
+// over its 32, measured on screen); off (0), only the bars' background. In Dot style the readings' dot, where theirs is drawn: on,
 // filled in that colour; off, a 1-pt ring at the bars' background opacity. By its share of time busy (CpuReadings
 // neuralEngineByShare) it is not drawn here but as the GPU's bar is, among the block's readings
 static void _render_neural_engine(CGContextRef ctx, CGFloat x, int state, CGFloat color, bool bar, CGFloat tickWidth, bool light, CGFloat bottom)
@@ -733,8 +733,8 @@ static void _render_battery_cap(CGContextRef ctx, CGFloat x, CGFloat width)
 }
 
 // the battery's bar at x, width wide, in style (CPU_RENDER_BATTERY_*; an unknown one as CPU_RENDER_BATTERY_LIGHT_TINT): its
-// background over the whole bar from bottom, then the fill in fill (at 0.9 opacity when neutral, on the adapter and not
-// charging), the charge's share of the height, its top on a device pixel, and over them the number: the charge in whole
+// background above the fill only, from the fill's top, then the fill in fill (at 0.9 opacity alone when neutral, on
+// the adapter and not charging), the charge's share of the height, its top on a device pixel, and over them the number: the charge in whole
 // percent, 0 to 99, its digits upright and stacked from the top, 5 pt tall, 1 pt apart, each centred across the bar on
 // whole points and the stack 1 pt above the image's centre, on device pixels, so the digits' edges are sharp. Each
 // style's colours are CPU_RENDER_BATTERY_*'s in CpuRenderer.h; a digit cut out lets the menu bar show through it. No
@@ -773,8 +773,10 @@ static void _render_battery_bar(CGContextRef ctx, CGFloat x, CGFloat width, doub
       }
       break;
   }
-  CGContextFillRect(ctx, CGRectMake(x, bottom, width, 16.0-bottom));
   const CGRect filled = CGRectMake(x, bottom, width, _snap(share*(16.0-bottom), scale));
+  // the background only above the fill: over it, the neutral fill at 0.9 was brighter than the text colour at 0.9 alone,
+  // which gives the system's icons' 233 over the dark menu bar's 32 (as the Neural Engine's bar and Wi-Fi's do)
+  CGContextFillRect(ctx, CGRectMake(x, CGRectGetMaxY(filled), width, 16.0 - CGRectGetMaxY(filled)));
   CGContextSetRGBFillColor(ctx, fill.r, fill.g, fill.b, neutral ? 0.9 : 1.0);
   CGContextFillRect(ctx, filled);
   const long percent = lround(share*100.0);
@@ -830,8 +832,9 @@ static void _render_battery_bar(CGContextRef ctx, CGFloat x, CGFloat width, doub
   }
   else
   {
-    // cut out: everywhere, or in the tint style only where they cross the fill
-    if (style == CPU_RENDER_BATTERY_TINT)
+    // cut out: everywhere, or in the tint style off the adapter only where they cross the fill (on the adapter everywhere,
+    // so that the text colour drawn above the fill below stands at 0.9 alone, not over the background)
+    if ((style == CPU_RENDER_BATTERY_TINT) && !neutral)
     {
       CGContextClipToRect(ctx, filled);
     }
