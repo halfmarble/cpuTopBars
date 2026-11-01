@@ -897,7 +897,8 @@ static void _render_battery(CGContextRef ctx, CGFloat x, double charge, bool cha
 // top, whole, without the dashes, the gaps between them clear and equal (1.5 pt over the 16 pt, 1 pt over the dashed
 // style's 14), each segment's foot on a device pixel (at 1x the solid style's gaps are 2 and 1 pt in turn): ceil(fill *
 // segments) lit from the bottom, at least one while the fill is 0 or more, in the text colour at
-// 0.9 opacity over the bars' background; the rest, and all below 0 (off, not connected, not readable), the background
+// 0.9 opacity alone, as the Neural Engine's bar is: over the bars' background it read 238 over the dark menu bar's 32,
+// brighter than the system's icons' 233; the rest, and all below 0 (off, not connected, not readable), the background
 // alone. In Dot style the readings' dot, filled while the fill is 0.005 or more, else a 1-pt ring
 static void _render_wifi(CGContextRef ctx, CGFloat x, double fill, CGFloat color, bool bar, CGFloat tickWidth, bool light, CGFloat bottom)
 {
@@ -915,9 +916,12 @@ static void _render_wifi(CGContextRef ctx, CGFloat x, double fill, CGFloat color
   for (int i=0; i<segments; i++)
   {
     const CGRect segment = CGRectMake(x, _snap(bottom + (i*(height + gap)), scale), 2.0*tickWidth, height);
-    CGContextSetGrayFillColor(ctx, color, light ? 0.12 : 0.3);
-    CGContextFillRect(ctx, segment);
-    if (i < lit)
+    if (i >= lit)
+    {
+      CGContextSetGrayFillColor(ctx, color, light ? 0.12 : 0.3);
+      CGContextFillRect(ctx, segment);
+    }
+    else
     {
       CGContextSetGrayFillColor(ctx, light ? 0.0 : 1.0, 0.9);
       CGContextFillRect(ctx, segment);

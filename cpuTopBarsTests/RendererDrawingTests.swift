@@ -413,13 +413,13 @@ extension FreeTests {
       #expect(Self.batteryFont)
       // at 1x and 2x every edge of the digits, of the battery's fill and of the Wi-Fi segments falls on a device pixel, so
       // no pixel of the battery's or Wi-Fi's bar is a blend: each alpha is one the style can produce, within 2: clear (the
-      // cut-out digits), Wi-Fi's background 77 and fill 238, the battery's background (light tint 255, grey 153, light grey
+      // cut-out digits), Wi-Fi's background 77 and fill 230, the battery's background (light tint 255, grey 153, light grey
       // 191, tint 97), its fill 255 and its digits 255 (the light tint's, the tint style's above the fill). A half-covered
       // pixel would read between them. Dark bar, battery, charges 0.5 (the fill's top on a whole point in both styles: 8,
       // and 2 + 7 = 9), 0.62 and 0.2 (tops of 9.92 and 3.2 solid, 2 + 8.68 and 2 + 2.8 dashed, snapped to device pixels; left
       // unsnapped, their top rows would blend); the other alphas are 0 and 255 at the edges the cut-outs touch
       let background = [Int32(255), 153, 191, 97][Int(style)]
-      let allowed = [0, 77, 238, 255, Int(background)]
+      let allowed = [0, 77, 230, 255, Int(background)]
       for charge in [0.5, 0.62, 0.2] {
         var r = batteryReadings(charge, style: style)
         r.wifiShown = true
@@ -530,7 +530,8 @@ extension FreeTests {
     func wifiSegmentsLightWithTheSignal(fill: Double, lit: Int) {
       // Wi-Fi alone: its bar is the first reading, x = 0 to 8. In the dashed style, from DASHED_BOTTOM 2: five segments 2 pt
       // tall, 1 pt apart, at heights 2, 5, 8, 11 and 14; ceil(fill * 5) lit from the bottom, at least one from fill 0, white
-      // at 0.9 opacity over the background, the rest the background alone; the gaps and the rows below 2 clear
+      // at 0.9 opacity alone (alpha about 230, as the Neural Engine's bar), not over the background, which would make it
+      // 238 and brighter than the system's icons; the rest the background alone; the gaps and the rows below 2 clear
       var r = readings(disk: -1)
       r.wifiShown = true
       r.wifi = fill
@@ -542,7 +543,8 @@ extension FreeTests {
           let y = 2 + (segment * 3)
           for row in [y, y + 1] {
             if segment < lit {
-              #expect(column[row] > 200, "lit, column \(x), height \(row): \(column[row])")
+              #expect(abs(Int(column[row]) - 230) <= 1, "lit, 0.9 opacity, column \(x), height \(row): \(column[row])")
+              #expect(image.red(x: x, y: row) == column[row], "white, column \(x), height \(row)")
             } else {
               #expect(column[row] > 0 && column[row] < 127, "background, column \(x), height \(row): \(column[row])")
             }

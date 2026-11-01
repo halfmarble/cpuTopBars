@@ -208,7 +208,7 @@ struct CpuReadings
   // Wi-Fi's signal as a fill, 0..1 (above 1 as 1); below 0, Wi-Fi off, not connected or not readable. In bar style
   // CPU_RENDER_WIFI_SEGMENTS segments from the bar's bottom to its top, whole, without the dashes, evenly spaced with clear
   // gaps, each segment's foot on a device pixel: ceil(fill * CPU_RENDER_WIFI_SEGMENTS) of them lit from the bottom, at least one while the fill is 0 or more, in
-  // the menu bar's text colour at 0.9 opacity over the bars' background, never in the ramp's colours; the rest, and all of
+  // the menu bar's text colour at 0.9 opacity alone (no background under them), never in the ramp's colours; the rest, and all of
   // them below 0, the background alone. In Dot style a dot filled while the fill is 0.005 or more, else a 1-pt ring at the
   // bars' background opacity. Drawn only with wifiShown
   double wifi;
