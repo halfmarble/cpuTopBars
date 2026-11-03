@@ -1983,6 +1983,7 @@ static NSTimeInterval lastReadings = 0.0;   // when overall CPU and memory were 
 static double readingsCpu = -1.0;           // overall CPU over the 1 s before it (after a reset, one tick), 0..1, -1 before the first
 static double readingsCpuEfficiency = -1.0; // the E-cores' and the P-cores' over the same window, read with it; -1: not read
 static double readingsCpuPerformance = -1.0;
+static std::vector<double> readingsCpuEach; // each logical CPU's over the same window, read with it, in CpuSampler's order (-1: no ticks); empty: not read
 static double readingsGpu = -1.0;           // the GPU's busy share, 0..1, read with them while the GPU's bar is shown; -1: not read
 static int readingsNeuralEngine = -1;       // the Neural Engine's power: 1 on, 0 off, -1 not read
 static double readingsNeuralEngineBusy = -1.0; // its share of time busy, 0..1, from IOReport, read with them; -1: not read
@@ -3295,7 +3296,7 @@ static NSString* CoreKindReadingValue(double busy, NSLocale* locale)
   return (busy < 0.0) ? @"—" : [[NSString alloc] initWithFormat:@"%ld%%" locale:locale, lround(busy * 100.0)];
 }
 
-// the core graph's label at the graph's latest tick, as its bars show it, laid out as Wi-Fi's: a section per kind of
+// the core graph's label from loads, each logical CPU's (0..1; below 0, not read: "—"), laid out as Wi-Fi's: a section per kind of
 // core, E first, each its title, "Efficiency cores:" or "Performance cores:", at the left edge, then a line per CPU of
 // that kind, by logical id, named by its kind and its number within the kind, with its load, "  E0:   18%"; a blank line
 // before each section after the first, which SetTipText draws as a menu-style line; when the kinds were not read, one
@@ -3359,23 +3360,33 @@ static NSString* CoresTipText(const std::vector<double>& loads, const char* kind
     {
       bool marked = (hovered >= 0) && (perBar > 0) && ((NSInteger)(cpus[k] / perBar) == hovered);
       NSString* name = [NSString stringWithFormat:@"%@%c%lu:", marked ? @"› " : @"  ", letters[section], (unsigned long)k];
-      NSString* load = [[NSString alloc] initWithFormat:@"%ld%%" locale:locale, lround(100.0 * loads[cpus[k]])];
+      NSString* load = (loads[cpus[k]] < 0.0) ? @"—" : [[NSString alloc] initWithFormat:@"%ld%%" locale:locale, lround(100.0 * loads[cpus[k]])];
       [lines addObject:[[name stringByPaddingToLength:width withString:@" " startingAtIndex:0] stringByAppendingString:load]];
     }
   }
   return [lines componentsJoinedByString:@"\n"];
 }
 
-// the core graph's label at its latest tick, the bar under the pointer marked (CoresTipText); index BAR_TIP_CORES_E or
-// BAR_TIP_CORES_P: that kind's section alone, its title line with that kind's reading (CoreKindReadingValue)
+// the core graph's label, the bar under the pointer marked (CoresTipText): BAR_TIP_CORES at the graph's latest tick, as
+// its bars show it; BAR_TIP_CORES_E or BAR_TIP_CORES_P that kind's section alone, its title line with that kind's
+// reading (CoreKindReadingValue) and each CPU over the same window, read with it (readingsCpuEach), so that the title
+// is close to the mean of its lines (equal to it where every CPU counts as many ticks), where at the latest tick a
+// title of 7% stood over four 0%; while those are not read, the latest tick
 - (NSString*)coresTipText:(NSInteger)index
 {
+  char only = (index == BAR_TIP_CORES_E) ? 'E' : ((index == BAR_TIP_CORES_P) ? 'P' : 0);
+  bool windowed = (only != 0) && (cpu_info.countLogical > 0) && (readingsCpuEach.size() == cpu_info.countLogical);
+  static bool windowLogged = false;
+  if ((only != 0) && !windowed && !windowLogged)
+  {
+    windowLogged = true;
+    NSLog(@"the %c-cores' label shows the latest tick: each CPU's share over the readings' window is not read (%lu of %u)", only, (unsigned long)readingsCpuEach.size(), cpu_info.countLogical);
+  }
   std::vector<double> loads;
   for (natural_t i=0; i<cpu_info.countLogical; i++)
   {
-    loads.push_back(fmin(fmax(cpu_info.now[i].load, 0.0), 1.0));
+    loads.push_back(windowed ? fmin(readingsCpuEach[i], 1.0) : fmin(fmax(cpu_info.now[i].load, 0.0), 1.0));
   }
-  char only = (index == BAR_TIP_CORES_E) ? 'E' : ((index == BAR_TIP_CORES_P) ? 'P' : 0);
   NSString* titleValue = nil;
   if (only != 0)
   {
@@ -4166,12 +4177,16 @@ static void WifiRead(SystemInfoWifi* wifi, bool full)
   {
     double efficiency = -1.0;
     double performance = -1.0;
-    double cpu = SystemInfoCpuBusy(NULL, &efficiency, &performance);
+    std::vector<double> each(cpu_info.countLogical);
+    natural_t eachCount = 0;
+    double cpu = SystemInfoCpuBusyEach(NULL, &efficiency, &performance, each.data(), (natural_t)each.size(), &eachCount);
     if (cpu >= 0.0)
     {
       readingsCpu = cpu;
       readingsCpuEfficiency = efficiency;
       readingsCpuPerformance = performance;
+      each.resize(eachCount);
+      readingsCpuEach = each;
       static bool kindsLogged = false;
       if ((cpuKinds != NULL) && ((efficiency < 0.0) || (performance < 0.0)) && !kindsLogged)
       {

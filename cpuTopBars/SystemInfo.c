@@ -56,12 +56,15 @@ static mach_port_t HostPort(void)
 
 #define CPU_RING_SIZE   (64)    // 6.3 s at the fastest refresh (0.1 s), enough for a 1 s window at every setting
 #define CPU_WINDOW      (1.0)   // s
+#define CPU_EACH_MAX    (64)    // logical CPUs whose own ticks a sample keeps; a Mac with more keeps none (eachCount 0)
 
 struct CpuSample
 {
   uint32_t ticks[CPU_STATE_MAX];        // the host's
   uint32_t cpuTicks[CPU_STATE_MAX];     // every CPU's, summed
   uint32_t kindTicks[2][CPU_STATE_MAX]; // [0] the E-cores', [1] the P-cores', each summed over its CPUs
+  uint32_t eachTicks[CPU_EACH_MAX][CPU_STATE_MAX]; // each CPU's own, in host_processor_info's order
+  natural_t eachCount;          // CPUs in eachTicks; 0: none kept
   bool     perCpu;              // cpuTicks were read
   bool     kinds;               // kindTicks were read
   double   time;                // s, CLOCK_MONOTONIC_RAW
@@ -95,11 +98,13 @@ void SystemInfoCpuSetKinds(natural_t count, const char* kinds)
 // summed over its CPUs, into its kindTicks (kinds: false also when there are no kinds or the CPUs' count is not the
 // kinds'). The sums wrap in 32 bits as the kernel's counters do, so a difference of two of them is still right across
 // a wrap. Each CPU's counters advance about 100 ticks a second, steadily, where the host's stall and catch up (over
-// three 1 s windows on an M3, 798-803 summed over its 8 CPUs against the host's 794, 1,121 and 655)
+// three 1 s windows on an M3, 798-803 summed over its 8 CPUs against the host's 794, 1,121 and 655). Each CPU's own
+// ticks too, into eachTicks, up to CPU_EACH_MAX CPUs (eachCount: 0 when they cannot be read or there are more)
 static void CpuEachTicks(CpuSample* sample)
 {
   sample->perCpu = false;
   sample->kinds = false;
+  sample->eachCount = 0;
   natural_t count = 0;
   processor_cpu_load_info_t load = NULL;
   mach_msg_type_number_t size = 0;
@@ -108,6 +113,7 @@ static void CpuEachTicks(CpuSample* sample)
     return;
   }
   bool kinds = (cpuKinds != NULL) && (count == cpuKindsCount);
+  bool each = (count <= CPU_EACH_MAX);
   memset(sample->cpuTicks, 0, sizeof(sample->cpuTicks));
   memset(sample->kindTicks, 0, sizeof(sample->kindTicks));
   for (natural_t c=0; c<count; c++)
@@ -117,8 +123,13 @@ static void CpuEachTicks(CpuSample* sample)
     {
       sample->cpuTicks[i] += load[c].cpu_ticks[i];
       sample->kindTicks[kind][i] += load[c].cpu_ticks[i];
+      if (each)
+      {
+        sample->eachTicks[c][i] = load[c].cpu_ticks[i];
+      }
     }
   }
+  sample->eachCount = each ? count : 0;
   sample->perCpu = true;
   sample->kinds = kinds;
   // size counts integers; vm_deallocate takes bytes
@@ -169,6 +180,15 @@ void SystemInfoCpuTick(void)
 
 double SystemInfoCpuBusy(double* span, double* efficiency, double* performance)
 {
+  return SystemInfoCpuBusyEach(span, efficiency, performance, NULL, 0, NULL);
+}
+
+double SystemInfoCpuBusyEach(double* span, double* efficiency, double* performance, double* each, natural_t capacity, natural_t* eachCount)
+{
+  if (eachCount != NULL)
+  {
+    *eachCount = 0;
+  }
   if (span != NULL)
   {
     *span = 0.0;
@@ -219,6 +239,15 @@ double SystemInfoCpuBusy(double* span, double* efficiency, double* performance)
       {
         *performance = CpuTicksBusy(now->kindTicks[1], then->kindTicks[1]);
       }
+    }
+    if ((each != NULL) && (eachCount != NULL) && (now->eachCount > 0) && (now->eachCount == then->eachCount) &&
+        (now->eachCount <= capacity))
+    {
+      for (natural_t c=0; c<now->eachCount; c++)
+      {
+        each[c] = CpuTicksBusy(now->eachTicks[c], then->eachTicks[c]);
+      }
+      *eachCount = now->eachCount;
     }
     return busy;
   }

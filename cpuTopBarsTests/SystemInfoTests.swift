@@ -73,6 +73,47 @@ extension FreeTests {
       #expect(span >= 1.0)
     }
 
+    @Test func eachCpuOverTheSameWindow() {
+      // SystemInfoCpuBusyEach gives what SystemInfoCpuBusy gives, over the same window, and each logical CPU's busy
+      // share in it, one per CPU host_processor_info counts (hw.ncpu), each 0..1 or -1, nothing written past them
+      SystemInfoCpuReset()
+      SystemInfoCpuTick()
+      let until = Date().addingTimeInterval(1.1)
+      var spin = 0.0
+      while Date() < until { spin += 1 }
+      SystemInfoCpuTick()
+      let cpus = ProcessInfo.processInfo.processorCount
+      var each = [Double](repeating: -2, count: cpus + 1)
+      var count: natural_t = 99
+      var span = 0.0, spanEach = 0.0
+      let busy = SystemInfoCpuBusy(&span, nil, nil)
+      let busyEach = SystemInfoCpuBusyEach(&spanEach, nil, nil, &each, natural_t(each.count), &count)
+      #expect(busyEach == busy && spanEach == span, "busy \(busy) after \(spin) loops")
+      #expect(Int(count) == cpus)
+      #expect(each.prefix(cpus).allSatisfy { ($0 >= 0 && $0 <= 1) || $0 == -1 }, "\(each)")
+      #expect(each[cpus] == -2)
+      // every CPU's counters advance about 100 ticks a second (SystemInfo.c, CpuEachTicks), so over 1.1 s each CPU has
+      // ticks and a share, and the overall share, all CPUs' ticks summed, is close to the mean of theirs (within 0.0020
+      // in 56 windows, measured on an M3): the E and P labels' titles over their lines
+      let read = each.prefix(cpus).filter { $0 >= 0 }
+      #expect(read.count == cpus, "\(each)")
+      let mean = read.reduce(0, +) / Double(max(read.count, 1))
+      #expect(abs(mean - busy) < 0.01, "mean \(mean), busy \(busy), each \(each)")
+      // too small a capacity, or no buffer, writes none and counts 0; the busy share is still given
+      var small = [Double](repeating: -2, count: max(cpus - 1, 1))
+      #expect(SystemInfoCpuBusyEach(nil, nil, nil, &small, natural_t(cpus - 1), &count) == busy)
+      #expect(count == 0)
+      #expect(small.allSatisfy { $0 == -2 })
+      count = 99
+      #expect(SystemInfoCpuBusyEach(nil, nil, nil, nil, 0, &count) == busy)
+      #expect(count == 0)
+      // after a reset, no reading and none written
+      SystemInfoCpuReset()
+      count = 99
+      #expect(SystemInfoCpuBusyEach(nil, nil, nil, &each, natural_t(each.count), &count) == -1)
+      #expect(count == 0)
+    }
+
     // the power source keys' literal values, from IOPSKeys.h
     private func powerSource(_ extra: [String: Any]) -> CFDictionary {
       var d: [String: Any] = ["Type": "InternalBattery", "Is Present": true, "Current Capacity": 87, "Max Capacity": 100]

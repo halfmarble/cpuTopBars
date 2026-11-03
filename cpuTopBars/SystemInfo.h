@@ -44,10 +44,17 @@ __BEGIN_DECLS
 // stores each kind's ticks, summed over its CPUs, and *efficiency and *performance, when not NULL, get each kind's busy
 // share over the same window, or -1 when it cannot be given (no kinds set, a sample without them, no CPU of that
 // kind, no ticks in it). SystemInfoCpuSetKinds copies the kinds; NULL forgets them.
+// Each CPU: every tick also stores each logical CPU's own ticks (up to 64 CPUs), and SystemInfoCpuBusyEach gives what
+// SystemInfoCpuBusy gives and, in the caller's each (capacity entries), each CPU's busy share over the same window, in
+// host_processor_info's order (CpuSampler's), -1 for a CPU with no ticks in it; *eachCount gets how many were written,
+// 0 when none could be (each or eachCount NULL, no reading, a sample without them, the count changed between the two,
+// or more CPUs than capacity).
 void SystemInfoCpuSetKinds(natural_t count, const char* kinds);
 void SystemInfoCpuReset(void);
 void SystemInfoCpuTick(void);
 double SystemInfoCpuBusy(double* span, double* efficiency, double* performance);
+double SystemInfoCpuBusyEach(double* span, double* efficiency, double* performance, double* each, natural_t capacity,
+                             natural_t* eachCount);
 
 // memory used as Activity Monitor counts it (app memory, wired and compressed) and the physical memory, in bytes
 bool SystemInfoMemory(uint64_t* used, uint64_t* total);
