@@ -77,11 +77,8 @@ enum Theme
 #define CPU_RENDER_KIND_CPU (6)
 #define CPU_RENDER_KIND_EFFICIENCY (7)
 #define CPU_RENDER_KIND_PERFORMANCE (8)
-// the battery bar's cap: its top CPU_RENDER_BATTERY_CAP pt, cut away but for the middle half
-#define CPU_RENDER_BATTERY_CAP (2.0)
-// the opacity of the battery bar's fill while charging, a shade under the 0.9 of the bar above it, so that the charge
-// shows on a bar white (black on a light menu bar) to its top
-#define CPU_RENDER_BATTERY_CHARGING_LEVEL (0.78)
+// the battery bar's cap: its top CPU_RENDER_BATTERY_CAP pt, the middle half of its width, solid above the outlined body
+#define CPU_RENDER_BATTERY_CAP (1.0)
 // the band under the bars that holds the block's letters (CpuReadings letters): the letters, 5 x 5-pt pixel bitmaps,
 // and a 3-pt gap above them, up to the bars' foot (in the dashed style the bars' clear 2-pt foot
 // is taken off, so the gap stays 3 pt); the image is then taller (CpuRenderImageHeight) by the band and by
@@ -173,18 +170,18 @@ struct CpuReadings
   // true: the battery's reading, a bar as wide as the readings', shaped as a battery and filled to its charge, is drawn
   // first, left of everything; false is the default. Ignored when the block is not drawn
   bool batteryShown;
-  // the battery's charge, 0..1 (above 1 as 1); below 0, not read: the bars' background only, no bolt, and in Dot style
-  // nothing. In bar style a wide bar, whole, without the dashes: a fill of that share of its height, its top on a device
-  // pixel, in the menu bar's text colour (white on a dark menu bar, black on a light one) at 0.9 opacity, alone; above it
-  // the bars' background, or while charging the text colour at 0.9 opacity and the fill at
-  // CPU_RENDER_BATTERY_CHARGING_LEVEL; over them a lightning bolt at any charge; its top CPU_RENDER_BATTERY_CAP pt cut away
-  // but for the middle half, a battery's cap, read or not. In Dot style a dot filled while the charge is 0.005 or more.
-  // Drawn only with batteryShown
+  // the battery's charge, 0..1 (above 1 as 1); below 0, not read: the empty battery, no bolt, and in Dot style nothing.
+  // In bar style a battery as tall as the bar, whole, without the dashes: a body outlined one device pixel wide in the
+  // menu bar's text colour at 0.9 (white on a dark menu bar, black on a light one), a solid cap CPU_RENDER_BATTERY_CAP pt
+  // tall over the middle half of its width, and inside the outline a fill of that share of the inside's height, its top on
+  // a device pixel, in the text colour at 0.9, the bars' background above it; over them a lightning bolt at any charge. In
+  // Dot style a dot filled while the charge is 0.005 or more. Drawn only with batteryShown
   double battery;
-  // the power state, which colours the bolt, or in Dot style the dot: charging, systemGreen at full opacity; else on the
-  // adapter (batteryOnAC: charged, or held below full, and not charging), the bolt black on a dark menu bar and white on
-  // a light one (the dot the text colour at 0.9 opacity); else on battery, systemRed at full opacity, as a zeroed struct
-  // draws it. Drawn only with batteryShown
+  // the power state, which colours the bolt, or in Dot style the dot: charging, systemGreen at 70% (each channel) at
+  // full opacity (the bolt systemRed at 70% on a light menu bar, as on battery); else on the adapter (batteryOnAC:
+  // charged, or held below full, and not charging), the bolt black on a dark menu bar and white on a light one (the dot
+  // the text colour at 0.9 opacity); else on battery, systemRed at 70% at full opacity, as a zeroed struct draws it.
+  // Drawn only with batteryShown
   bool batteryCharging;
   bool batteryOnAC;
   // true: Wi-Fi's reading, a bar as wide as the readings' (a dot in Dot style), is drawn after the battery's, before disk;
