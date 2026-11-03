@@ -378,21 +378,30 @@ static NSString* PercentText(uint64_t part, uint64_t whole, NSLocale* locale)
   return [[NSString alloc] initWithFormat:@"%ld%%" locale:locale, percent];
 }
 
-// text led by figure spaces (U+2007), as wide as a digit in the menu font, to at least width characters, so that a
-// hover label's figure keeps its width as its value changes
-static NSString* FigurePadded(NSString* text, NSUInteger width)
-{
-  if (text.length >= width)
-  {
-    return text;
-  }
-  return [[@"" stringByPaddingToLength:(width - text.length) withString:@"\u2007" startingAtIndex:0] stringByAppendingString:text];
-}
-
 // "0.51 GB", "1.23 GB": a process's memory, always in GB, in units of 1024, two decimals
 static NSString* MemoryText(uint64_t bytes)
 {
   return [NSString stringWithFormat:@"%.2f GB", (double)bytes / 1073741824.0];
+}
+
+// a hover label's lines, one value to a line: each row is @[name, value], the name padded with spaces to the longest
+// name's length and three, so that the values start in one column in the label's monospace font, as Wi-Fi's label
+// does (WifiTipText); the lines joined by "\n"; a label of one line, its name and one space ("CPU: 21%", as before).
+// Defined here, before the labels that use it; Wi-Fi's keeps its own.
+static NSString* TipLines(NSArray<NSArray<NSString*>*>* rows)
+{
+  NSUInteger gap = (rows.count == 1) ? 1 : 3;
+  NSUInteger width = 0;
+  for (NSArray<NSString*>* row in rows)
+  {
+    width = MAX(width, row[0].length + gap);
+  }
+  NSMutableArray<NSString*>* lines = [NSMutableArray arrayWithCapacity:rows.count];
+  for (NSArray<NSString*>* row in rows)
+  {
+    [lines addObject:[[row[0] stringByPaddingToLength:width withString:@" " startingAtIndex:0] stringByAppendingString:row[1]]];
+  }
+  return [lines componentsJoinedByString:@"\n"];
 }
 
 // "16GB Memory usage:": a row's title led by its whole, written without a space ("16 GB" -> "16GB")
@@ -402,22 +411,19 @@ static NSString* TotalTitle(NSString* wholeText, NSString* name)
 }
 
 // the startup volume's row from its size and free space: title ("995GB Disk usage:"), text ("72% (free 279 GB, used 716 GB)")
-// and tipText, the same with its free and used figures padded to one width, for the hover label (readDisk)
+// and tipText, the hover label's lines (TipLines): "Disk usage:   72%", "Free:         279 GB", "Used:         716 GB" and
+// "Total:        995 GB", every value starting in one column; "Disk usage: —" when the volume has no size (readDisk)
 static void DiskTexts(uint64_t wholeBytes, uint64_t freeBytes, NSLocale* locale, NSString* __strong * title, NSString* __strong * text, NSString* __strong * tipText)
 {
   *title = TotalTitle(GBText(wholeBytes, locale), @"Disk usage:");
   uint64_t usedBytes = (wholeBytes > freeBytes) ? (wholeBytes - freeBytes) : 0;
   *text = PercentText(usedBytes, wholeBytes, locale);
-  *tipText = *text;
+  *tipText = [@"Disk usage: " stringByAppendingString:*text];
   if (wholeBytes > 0)
   {
     NSString* freeText = GBText(wholeBytes - usedBytes, locale);
     NSString* usedText = GBText(usedBytes, locale);
-    // "999 GB" and "9.9 TB" are six characters; a larger volume's figures are no wider than its whole with one
-    // decimal ("16.0 TB")
-    NSString* wholeTB = [NSString stringWithFormat:@"%.1f TB", (double)wholeBytes / 1e12];
-    NSUInteger width = MAX((NSUInteger)6, wholeTB.length);
-    *tipText = [NSString stringWithFormat:@"%@ (free %@, used %@)", *text, FigurePadded(freeText, width), FigurePadded(usedText, width)];
+    *tipText = TipLines(@[@[@"Disk usage:", *text], @[@"Free:", freeText], @[@"Used:", usedText], @[@"Total:", GBText(wholeBytes, locale)]]);
     *text = [NSString stringWithFormat:@"%@ (free %@, used %@)", *text, freeText, usedText];
   }
 }
@@ -1971,7 +1977,7 @@ static NSTimeInterval lastDiskRead = 0.0;   // when the last disk read started, 
 static NSTimeInterval lastDiskAttempt = 0.0; // when the last disk read started, never reset: a failing read is retried once a minute
 static double diskFraction = -1.0;          // how full the volume was at the last reading, 0..1, -1 before the first
 static NSString* diskText = nil;            // the last reading of the startup volume ("72% (free 279 GB, used 716 GB)"), nil before the first
-static NSString* diskTipText = nil;         // the same, its free and used figures padded to one width, for the hover label
+static NSString* diskTipText = nil;         // the hover label's lines, "Disk usage:", "Free:", "Used:" and "Total:", one value to a line
 static NSString* diskTitle = nil;           // its title, with the volume's size ("995GB Disk usage:")
 static NSTimeInterval lastReadings = 0.0;   // when overall CPU and memory were last read, system uptime; 0: read soon
 static double readingsCpu = -1.0;           // overall CPU over the 1 s before it (after a reset, one tick), 0..1, -1 before the first
@@ -3055,8 +3061,9 @@ NSView* MenuRowsHelpExample(const CpuReadings* readings, const double* coreLoads
   [self updateBarTips:readings];
 }
 
-// a tooltip-style label under each reading's bar (or dot) in the status item: disk, memory, CPU, worded as the panel's
-// rows, the E-cores' and the P-cores' as "Efficiency cores: 22%" and "Performance cores: 13%", and each extra bar's,
+// a tooltip-style label under each reading's bar (or dot) in the status item: disk, memory, CPU and the battery, one
+// value to a line ("Disk usage:", "Free:", "Used:", "Total:"; TipLines), the E-cores' and the P-cores' as "Efficiency cores: 22%"
+// and "Performance cores: 13%", and each extra bar's,
 // worded by its class (barLabels); and one under the core graph, with or without the readings: each CPU's load by kind,
 // the bar under the pointer marked (CoresTipText); when the graph splits, one under the E-cores' reading and bars, the
 // reading's line and then their CPUs alone, and one under the P-cores' with theirs; the mark follows the pointer along
@@ -3359,13 +3366,15 @@ static NSString* CoresTipText(const std::vector<double>& loads, const char* kind
 
 // a label's whole percentages three characters wide, "  1%", " 10%", "100%", so that a label in the monospaced font
 // keeps its width as its values change; one after "~", an estimate, keeps its own width, and so does one whose
-// digits follow a figure space (U+2007): a label that pads its own numbers with figure spaces keeps them
+// digits follow a figure space (U+2007): a label that pads its own numbers with figure spaces keeps them; and so does
+// one after three spaces, a value that starts its line's value column (TipLines), so that every value of a label laid
+// out one value to a line starts in one column, as Wi-Fi's do ("Disk usage:   74%" over "Free:         257 GB")
 static NSString* TipPercents(NSString* text)
 {
   static NSRegularExpression* percent = nil;
   if (percent == nil)
   {
-    percent = [NSRegularExpression regularExpressionWithPattern:@"(?<![0-9.,~\\x{2007}])([0-9]{1,3})%" options:0 error:NULL];
+    percent = [NSRegularExpression regularExpressionWithPattern:@"(?<![0-9.,~\\x{2007}])(?<!   )([0-9]{1,3})%" options:0 error:NULL];
   }
   NSMutableString* padded = [text mutableCopy];
   NSArray<NSTextCheckingResult*>* matches = [percent matchesInString:text options:0 range:NSMakeRange(0, text.length)];
@@ -3450,10 +3459,35 @@ static NSString* BatteryValueText(bool read, const SystemInfoBattery* battery)
   return [[NSString alloc] initWithFormat:@"%ld%% (%@)" locale:[NSLocale currentLocale], lround(fmin(fmax(battery->level, 0.0), 1.0) * 100.0), @(state)];
 }
 
-// the battery's hover label, "Battery: 87% (charging)"; unpadded, as barTipTextAt: pads it
+// the battery's hover label, one value to a line (TipLines): "Battery:" and the charge, "State:" ("charged", "charging",
+// "not charging" or "on battery", tested in the order SystemInfoBatteryStateText tests them) and, on battery with its time
+// to empty read, "Time left:" ("3:12"); "Battery: —" when it was not read; unpadded, as barTipTextAt: pads it
 static NSString* BatteryTipText(bool read, const SystemInfoBattery* battery)
 {
-  return [@"Battery: " stringByAppendingString:BatteryValueText(read, battery)];
+  if (!read)
+  {
+    return @"Battery: —";
+  }
+  NSString* charge = [[NSString alloc] initWithFormat:@"%ld%%" locale:[NSLocale currentLocale], lround(fmin(fmax(battery->level, 0.0), 1.0) * 100.0)];
+  NSString* state = @"on battery";
+  if (battery->charged)
+  {
+    state = @"charged";
+  }
+  else if (battery->charging)
+  {
+    state = @"charging";
+  }
+  else if (battery->onAC)
+  {
+    state = @"not charging";
+  }
+  NSMutableArray<NSArray<NSString*>*>* rows = [NSMutableArray arrayWithObjects:@[@"Battery:", charge], @[@"State:", state], nil];
+  if (!battery->charged && !battery->charging && !battery->onAC && (battery->minutesToEmpty > 0))
+  {
+    [rows addObject:@[@"Time left:", [NSString stringWithFormat:@"%d:%02d", battery->minutesToEmpty / 60, battery->minutesToEmpty % 60]]];
+  }
+  return TipLines(rows);
 }
 
 // Wi-Fi's state in words, its panel row's value: "connected", "on, not connected" or "off"; "—" with no interface read
@@ -3580,7 +3614,7 @@ static NSString* HelpWifiLabel(void)
 }
 
 // the disk hover label of the help window's example, as the real one reads: 1 TB, readings->disk of it used, its
-// title and padded text (DiskTexts), the percentages padded (TipPercents)
+// lines (DiskTexts), the percentages padded (TipPercents)
 static NSString* HelpDiskLabel(const CpuReadings* readings)
 {
   uint64_t whole = 1000000000000ULL;
@@ -3589,7 +3623,7 @@ static NSString* HelpDiskLabel(const CpuReadings* readings)
   NSString* text = nil;
   NSString* tipText = nil;
   DiskTexts(whole, whole - used, [NSLocale currentLocale], &title, &text, &tipText);
-  return TipPercents([NSString stringWithFormat:@"%@ %@", title, tipText]);
+  return TipPercents(tipText);
 }
 
 // the readings example's caption, naming what it shows: the readings before the core graph, without the E-cores' and
@@ -3657,14 +3691,15 @@ static NSArray<NSView*>* HelpCoresExamples(const CpuReadings* readings, const do
   return examples;
 }
 
-// a label's text, its percentages three characters wide ("995GB Disk usage:  72%")
+// a label's text, its percentages three characters wide (TipPercents), but for a value that starts its line's value
+// column ("Disk usage:   72%", the next lines "Free:" and so on)
 - (NSString*)barTipTextAt:(NSInteger)index
 {
   return TipPercents([self barTipTextUnpaddedAt:index]);
 }
 
-// a reading's text, as its panel row with its figures padded (diskRowPadded:, memoryRowPadded:): "995GB Disk usage: 72% (free 279 GB,
-// used 716 GB)"; an extra bar's, its class's barLabels entry; the core graph's, coresTipText, one kind's (split) with
+// a reading's text, one value to a line (TipLines): "Disk usage:   72%", "Free:         279 GB", "Used:         716 GB",
+// "Total:        995 GB" (diskTipText); memory's, CPU's and the battery's the same way; an extra bar's, its class's barLabels entry; the core graph's, coresTipText, one kind's (split) with
 // that kind's reading, "Efficiency cores: 22%", in place of its section's title; empty when there is none
 - (NSString*)barTipTextUnpaddedAt:(NSInteger)index
 {
@@ -3695,7 +3730,6 @@ static NSArray<NSView*>* HelpCoresExamples(const CpuReadings* readings, const do
     NSString* label = (extraBarItem[extra] < labels.count) ? labels[extraBarItem[extra]] : nil;
     return [label isKindOfClass:[NSString class]] ? label : @"";
   }
-  NSArray<NSString*>* row = nil;
   switch (CpuRenderReadingKind(barTipMask, (int)index))
   {
     case CPU_RENDER_KIND_BATTERY:
@@ -3712,20 +3746,16 @@ static NSArray<NSView*>* HelpCoresExamples(const CpuReadings* readings, const do
       bool efficiency = (index == CpuRenderReadingEfficiency(barTipMask));
       return CoreKindReadingText(efficiency, efficiency ? readingsCpuEfficiency : readingsCpuPerformance, [NSLocale currentLocale]);
     }
-    // disk's, memory's and CPU's, as their panel rows, the disk's and memory's figures padded
+    // disk's, memory's and CPU's, one value to a line
     case CPU_RENDER_KIND_DISK:
-      row = [self diskRowPadded:true];
-      break;
+      return diskTipText ?: @"Disk usage: —";
     case CPU_RENDER_KIND_MEMORY:
-      row = [self memoryRowPadded:true];
-      break;
+      return [self memoryTipText];
     case CPU_RENDER_KIND_CPU:
-      row = [self cpuRow];
-      break;
+      return [self cpuTipText];
     default:
       return @"";
   }
-  return [NSString stringWithFormat:@"%@ %@", row[0], row[1]];
 }
 
 // follows the pointer: off the item (or the menu open), everything stops; on it, the watch runs; another reading, or
@@ -6045,16 +6075,34 @@ static void SetTipText(NSPanel* panel, NSTextField* label, NSString* text, CGFlo
   return rows;
 }
 
-// padded: the disk's figures in parentheses led by figure spaces to one width, as the hover labels show them, so that
-// a label keeps its width as its values change
-- (NSArray<NSString*>*)diskRowPadded:(bool)padded
+- (NSArray<NSString*>*)diskRow
 {
-  NSString* disk = (padded ? diskTipText : diskText) ?: @"—";
-  return @[diskTitle ?: @"Disk usage:", disk];
+  return @[diskTitle ?: @"Disk usage:", diskText ?: @"—"];
 }
 
-// padded: the memory's figures padded, as the disk's
-- (NSArray<NSString*>*)memoryRowPadded:(bool)padded
+// the memory's hover label, one value to a line (TipLines): "Memory usage:" and its percentage, "Free:", "Used:",
+// "Swapped:" (only while swap is read) and "Total:", every value starting in one column; "Memory usage: —" when it was
+// not read
+- (NSString*)memoryTipText
+{
+  if (!readingsMemory || (readingsMemoryTotal == 0))
+  {
+    return @"Memory usage: —";
+  }
+  NSLocale* locale = [NSLocale currentLocale];
+  uint64_t used = MIN(readingsMemoryUsed, readingsMemoryTotal);
+  NSMutableArray<NSArray<NSString*>*>* rows = [NSMutableArray arrayWithObjects:@[@"Memory usage:", PercentText(readingsMemoryUsed, readingsMemoryTotal, locale)],
+                                               @[@"Free:", GiBText(readingsMemoryTotal - used, locale)],
+                                               @[@"Used:", GiBText(used, locale)], nil];
+  if (readingsSwap)
+  {
+    [rows addObject:@[@"Swapped:", GiBText(readingsSwapUsed, locale)]];
+  }
+  [rows addObject:@[@"Total:", GiBText(readingsMemoryTotal, locale)]];
+  return TipLines(rows);
+}
+
+- (NSArray<NSString*>*)memoryRow
 {
   NSLocale* locale = [NSLocale currentLocale];
   NSString* memoryTitle = @"Memory usage:";
@@ -6066,10 +6114,8 @@ static void SetTipText(NSPanel* panel, NSTextField* label, NSString* text, CGFlo
     if (readingsMemoryTotal > 0)
     {
       uint64_t used = MIN(readingsMemoryUsed, readingsMemoryTotal);
-      // as wide as the whole with one decimal, "16.0 GB": no free or used figure is wider (swap can be)
-      NSUInteger width = padded ? [NSString stringWithFormat:@"%.1f GB", (double)readingsMemoryTotal / 1073741824.0].length : 0;
-      NSString* swapped = readingsSwap ? [NSString stringWithFormat:@", swapped %@", FigurePadded(GiBText(readingsSwapUsed, locale), width)] : @"";
-      memoryUsed = [NSString stringWithFormat:@"%@ (free %@, used %@%@)", memoryUsed, FigurePadded(GiBText(readingsMemoryTotal - used, locale), width), FigurePadded(GiBText(used, locale), width), swapped];
+      NSString* swapped = readingsSwap ? [NSString stringWithFormat:@", swapped %@", GiBText(readingsSwapUsed, locale)] : @"";
+      memoryUsed = [NSString stringWithFormat:@"%@ (free %@, used %@%@)", memoryUsed, GiBText(readingsMemoryTotal - used, locale), GiBText(used, locale), swapped];
     }
   }
   return @[memoryTitle, memoryUsed];
@@ -6080,13 +6126,30 @@ static void SetTipText(NSPanel* panel, NSTextField* label, NSString* text, CGFlo
   NSLocale* locale = [NSLocale currentLocale];
   double busy = readingsCpu;
   NSString* cpu = (busy < 0.0) ? @"—" : [[NSString alloc] initWithFormat:@"%ld%%" locale:locale, lround(busy * 100.0)];
-  // each kind's share beside it, "21% (Efficiency cores: 30%, Performance cores: 12%)", when both were read; the hover
-  // label pads these percentages too (TipPercents)
+  // each kind's share beside it, "21% (Efficiency cores: 30%, Performance cores: 12%)", when both were read
   if ((busy >= 0.0) && (readingsCpuEfficiency >= 0.0) && (readingsCpuPerformance >= 0.0))
   {
     cpu = [[NSString alloc] initWithFormat:@"%@ (Efficiency cores: %ld%%, Performance cores: %ld%%)" locale:locale, cpu, lround(readingsCpuEfficiency * 100.0), lround(readingsCpuPerformance * 100.0)];
   }
   return @[@"CPU:", cpu];
+}
+
+// the CPU's hover label, one value to a line (TipLines): "CPU:", and when both kinds were read, as in cpuRow,
+// "Efficiency cores:" and "Performance cores:"; "CPU: —" when it was not read
+- (NSString*)cpuTipText
+{
+  if (readingsCpu < 0.0)
+  {
+    return @"CPU: —";
+  }
+  NSLocale* locale = [NSLocale currentLocale];
+  NSMutableArray<NSArray<NSString*>*>* rows = [NSMutableArray arrayWithObject:@[@"CPU:", [[NSString alloc] initWithFormat:@"%ld%%" locale:locale, lround(readingsCpu * 100.0)]]];
+  if ((readingsCpuEfficiency >= 0.0) && (readingsCpuPerformance >= 0.0))
+  {
+    [rows addObject:@[@"Efficiency cores:", [[NSString alloc] initWithFormat:@"%ld%%" locale:locale, lround(readingsCpuEfficiency * 100.0)]]];
+    [rows addObject:@[@"Performance cores:", [[NSString alloc] initWithFormat:@"%ld%%" locale:locale, lround(readingsCpuPerformance * 100.0)]]];
+  }
+  return TipLines(rows);
 }
 
 - (NSArray<NSString*>*)gpuRow
@@ -6130,8 +6193,8 @@ static void SetTipText(NSPanel* panel, NSTextField* label, NSString* text, CGFlo
   {
     [rows addObjectsFromArray:WifiRows(&readingsWifi)];
   }
-  [rows addObject:[self diskRowPadded:false]];
-  [rows addObject:[self memoryRowPadded:false]];
+  [rows addObject:[self diskRow]];
+  [rows addObject:[self memoryRow]];
   [starts addIndex:rows.count];
   [rows addObjectsFromArray:[self readingRowsAfterGap]];
   for (id<MenuRows> menuRow in menuRows)
