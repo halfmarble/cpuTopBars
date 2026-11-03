@@ -3061,12 +3061,12 @@ NSView* MenuRowsHelpExample(const CpuReadings* readings, const double* coreLoads
   [self updateBarTips:readings];
 }
 
-// a tooltip-style label under each reading's bar (or dot) in the status item: disk, memory, CPU and the battery, one
-// value to a line ("Disk usage:", "Free:", "Used:", "Total:"; TipLines), the E-cores' and the P-cores' as "Efficiency cores: 22%"
+// a tooltip-style label under each reading's bar (or dot) in the status item: disk, memory, CPU, the battery and the GPU
+// with its power, one value to a line ("Disk usage:", "Free:", "Used:", "Total:"; TipLines), the E-cores' and the P-cores' as "Efficiency cores: 22%"
 // and "Performance cores: 13%", and each extra bar's,
 // worded by its class (barLabels); and one under the core graph, with or without the readings: each CPU's load by kind,
-// the bar under the pointer marked (CoresTipText); when the graph splits, one under the E-cores' reading and bars, the
-// reading's line and then their CPUs alone, and one under the P-cores' with theirs; the mark follows the pointer along
+// one value to a line, the bar under the pointer marked (CoresTipText); when the graph splits, one under the E-cores'
+// reading and bars, the reading's line and then their CPUs alone, and one under the P-cores' with theirs; the mark follows the pointer along
 // the graph, or along one kind's bars,
 // without hiding the label. On macOS 27 no tooltip showed on the status item when tried (a tooltip rect was never asked
 // for its text), but the pointer reaches the button, so the label is the app's own panel. updateBarTips: records where
@@ -3288,21 +3288,29 @@ static bool BarTipIsCores(NSInteger index)
   return core;
 }
 
-// the core graph's label at the graph's latest tick, as its bars show it: a section per kind of core, E first, each its
-// title, "Efficiency cores:" or "Performance cores:", then a line per CPU of that kind, by logical id, named by its
-// kind and its number within the kind, with its load, "              E0: 18%"; a blank line before each section after
-// the first, which SetTipText draws as a menu-style line; when the kinds were not read, one section, "Cores:", "C0:",
-// "C1:" ... Every title and name is right-aligned to the widest title shown (or the widest name, 2 cells more), so that its colon
-// is under the titles' and, once TipPercents pads the loads, every load ends in one column, under a title's reading
-// put after it ("Efficiency cores:  22%"). A CPU of the bar hovered (bar b averages CPUs b x perBar to b x perBar +
-// perBar - 1, as CpuRender groups them; -1: none) has "›" two cells left of its name, "            › E1: 42%". only
-// 'E' or 'P': that kind's section alone (0: every section); empty with no CPU
-static NSString* CoresTipText(const std::vector<double>& loads, const char* kinds, natural_t perBar, NSInteger hovered, char only, NSLocale* locale)
+// a kind of core's reading, "22%" ("—" when busy is below 0, not read): the value of its reading's label and of the
+// title line of a split core graph's label (CoresTipText)
+static NSString* CoreKindReadingValue(double busy, NSLocale* locale)
+{
+  return (busy < 0.0) ? @"—" : [[NSString alloc] initWithFormat:@"%ld%%" locale:locale, lround(busy * 100.0)];
+}
+
+// the core graph's label at the graph's latest tick, as its bars show it, laid out as Wi-Fi's: a section per kind of
+// core, E first, each its title, "Efficiency cores:" or "Performance cores:", at the left edge, then a line per CPU of
+// that kind, by logical id, named by its kind and its number within the kind, with its load, "  E0:   18%"; a blank line
+// before each section after the first, which SetTipText draws as a menu-style line; when the kinds were not read, one
+// section, "Cores:", "C0:", "C1:" ... Each CPU's line starts with two cells, "› " for a CPU of the bar hovered (bar b
+// averages CPUs b x perBar to b x perBar + perBar - 1, as CpuRender groups them; -1: none), two spaces for the others,
+// and every load starts in one column, 3 cells after the longest of those names, so that TipPercents leaves the loads
+// unpadded: "› E1:   42%", "  E2:   9%". only 'E' or 'P': that kind's section alone (0: every
+// section), and with titleValue (nil: none) its title a line of that column too, its value the kind's reading
+// ("Efficiency cores:   22%" over "  E0:               18%"); empty with no CPU
+static NSString* CoresTipText(const std::vector<double>& loads, const char* kinds, natural_t perBar, NSInteger hovered, char only, NSString* titleValue, NSLocale* locale)
 {
   const char letters[3] = {'E', 'P', 'C'};
   NSString* titles[3] = {@"Efficiency cores:", @"Performance cores:", @"Cores:"};
   std::vector<natural_t> sections[3];
-  NSUInteger width = 0;     // the column the colons end in, the titles' and the names' with "›" and its space
+  NSUInteger width = 0;     // the column the values start in: the longest name with its two lead cells, and three
   for (int section=0; section<3; section++)
   {
     if ((only != 0) && (letters[section] != only))
@@ -3319,8 +3327,12 @@ static NSString* CoresTipText(const std::vector<double>& loads, const char* kind
     }
     if (!sections[section].empty())
     {
-      NSUInteger last = [NSString stringWithFormat:@"%c%lu:", letters[section], (unsigned long)(sections[section].size() - 1)].length;
-      width = MAX(width, MAX(titles[section].length, last + 2));
+      NSUInteger last = [NSString stringWithFormat:@"  %c%lu:", letters[section], (unsigned long)(sections[section].size() - 1)].length;
+      width = MAX(width, last + 3);
+      if ((only != 0) && (titleValue != nil))
+      {
+        width = MAX(width, titles[section].length + 3);
+      }
     }
   }
   NSMutableArray<NSString*>* lines = [NSMutableArray array];
@@ -3335,24 +3347,27 @@ static NSString* CoresTipText(const std::vector<double>& loads, const char* kind
     {
       [lines addObject:@""];
     }
-    [lines addObject:[[@"" stringByPaddingToLength:(width - titles[section].length) withString:@" " startingAtIndex:0] stringByAppendingString:titles[section]]];
+    if ((only != 0) && (titleValue != nil))
+    {
+      [lines addObject:[[titles[section] stringByPaddingToLength:width withString:@" " startingAtIndex:0] stringByAppendingString:titleValue]];
+    }
+    else
+    {
+      [lines addObject:titles[section]];
+    }
     for (size_t k=0; k<cpus.size(); k++)
     {
       bool marked = (hovered >= 0) && (perBar > 0) && ((NSInteger)(cpus[k] / perBar) == hovered);
-      NSString* name = [NSString stringWithFormat:@"%c%lu:", letters[section], (unsigned long)k];
-      NSMutableString* lead = [[@"" stringByPaddingToLength:(width - name.length) withString:@" " startingAtIndex:0] mutableCopy];
-      if (marked)
-      {
-        [lead replaceCharactersInRange:NSMakeRange(lead.length - 2, 1) withString:@"›"];
-      }
-      [lines addObject:[[NSString alloc] initWithFormat:@"%@%@ %ld%%" locale:locale, lead, name, lround(100.0 * loads[cpus[k]])]];
+      NSString* name = [NSString stringWithFormat:@"%@%c%lu:", marked ? @"› " : @"  ", letters[section], (unsigned long)k];
+      NSString* load = [[NSString alloc] initWithFormat:@"%ld%%" locale:locale, lround(100.0 * loads[cpus[k]])];
+      [lines addObject:[[name stringByPaddingToLength:width withString:@" " startingAtIndex:0] stringByAppendingString:load]];
     }
   }
   return [lines componentsJoinedByString:@"\n"];
 }
 
 // the core graph's label at its latest tick, the bar under the pointer marked (CoresTipText); index BAR_TIP_CORES_E or
-// BAR_TIP_CORES_P: that kind's section alone
+// BAR_TIP_CORES_P: that kind's section alone, its title line with that kind's reading (CoreKindReadingValue)
 - (NSString*)coresTipText:(NSInteger)index
 {
   std::vector<double> loads;
@@ -3361,7 +3376,12 @@ static NSString* CoresTipText(const std::vector<double>& loads, const char* kind
     loads.push_back(fmin(fmax(cpu_info.now[i].load, 0.0), 1.0));
   }
   char only = (index == BAR_TIP_CORES_E) ? 'E' : ((index == BAR_TIP_CORES_P) ? 'P' : 0);
-  return CoresTipText(loads, cpuKinds, cpu_info.countLogical / CpuSamplerGetCount(granularity), [self barTipCoreNow], only, [NSLocale currentLocale]);
+  NSString* titleValue = nil;
+  if (only != 0)
+  {
+    titleValue = CoreKindReadingValue((only == 'E') ? readingsCpuEfficiency : readingsCpuPerformance, [NSLocale currentLocale]);
+  }
+  return CoresTipText(loads, cpuKinds, cpu_info.countLogical / CpuSamplerGetCount(granularity), [self barTipCoreNow], only, titleValue, [NSLocale currentLocale]);
 }
 
 // a label's whole percentages three characters wide, "  1%", " 10%", "100%", so that a label in the monospaced font
@@ -3386,12 +3406,10 @@ static NSString* TipPercents(NSString* text)
   return padded;
 }
 
-// the reading line of a kind of core, "Efficiency cores: 22%" or "Performance cores: 13%" ("—" when busy is below 0,
-// not read): a reading's label, and the title of a split core graph's label (barTipTextUnpaddedAt:)
+// the reading's label of a kind of core, "Efficiency cores: 22%" or "Performance cores: 13%" (CoreKindReadingValue)
 static NSString* CoreKindReadingText(bool efficiency, double busy, NSLocale* locale)
 {
-  NSString* value = (busy < 0.0) ? @"—" : [[NSString alloc] initWithFormat:@"%ld%%" locale:locale, lround(busy * 100.0)];
-  return [NSString stringWithFormat:@"%@ %@", efficiency ? @"Efficiency cores:" : @"Performance cores:", value];
+  return [NSString stringWithFormat:@"%@ %@", efficiency ? @"Efficiency cores:" : @"Performance cores:", CoreKindReadingValue(busy, locale)];
 }
 
 // a help example's CPU, E and P readings from its core loads, coreLoads[i % coreLoadCount] for logical CPU i, as the app
@@ -3422,15 +3440,23 @@ static void HelpCoreReadings(const double* coreLoads, int coreLoadCount, CpuRead
   readings->performance = (kindCount[1] > 0) ? (kindSum[1] / kindCount[1]) : -1.0;
 }
 
-// the GPU's hover label, "GPU: 12%", and the Neural Engine's, "Neural Engine: ON", or with its share of time busy read
-// (busy 0..1), "Neural Engine: 37%"; unpadded, as barTipTextAt: pads them
-static NSString* GpuTipText(double gpu)
+// the GPU's hover label, "GPU: 12%", and with its power read (watts 0 or more: IOReport, the unsandboxed variant) one
+// value to a line (TipLines), "GPU:     12%" over "Power:   0.08 W"; the Neural Engine's, "Neural Engine: ON", or with
+// its share of time busy read (busy 0..1), "Neural Engine: 37%"; unpadded, as barTipTextAt: pads them
+static NSString* GpuTipText(double gpu, double watts)
 {
   if (gpu < 0.0)
   {
     return @"GPU: cannot be read on this Mac";
   }
-  return [[NSString alloc] initWithFormat:@"GPU: %ld%%" locale:[NSLocale currentLocale], lround(fmin(gpu, 1.0) * 100.0)];
+  NSLocale* locale = [NSLocale currentLocale];
+  NSMutableArray<NSArray<NSString*>*>* rows = [NSMutableArray arrayWithObject:
+    @[@"GPU:", [[NSString alloc] initWithFormat:@"%ld%%" locale:locale, lround(fmin(gpu, 1.0) * 100.0)]]];
+  if (watts >= 0.0)
+  {
+    [rows addObject:@[@"Power:", [[NSString alloc] initWithFormat:@"%.2f W" locale:locale, watts]]];
+  }
+  return TipLines(rows);
 }
 
 static NSString* NeuralEngineTipText(int state, double busy)
@@ -3572,10 +3598,15 @@ static NSArray<NSArray<NSString*>*>* WifiRows(const SystemInfoWifi* wifi)
   return @[@[@"Wi-Fi:", WifiStateText(wifi)]];
 }
 
-// the GPU hover label of the help window's example, as the real one reads, the percentage padded (TipPercents)
+// the GPU hover label of the help window's example, as the real one reads, the percentage padded (TipPercents); in the
+// unsandboxed variant, which reads the GPU's power, with 0.08 W of it
 static NSString* HelpGpuLabel(const CpuReadings* readings)
 {
-  return TipPercents(GpuTipText(readings->gpu));
+#if CPUTOPBARS_SANDBOXED
+  return TipPercents(GpuTipText(readings->gpu, -1.0));
+#else
+  return TipPercents(GpuTipText(readings->gpu, 0.08));
+#endif
 }
 
 // the help window's Wi-Fi example, a connection as this app reads one: -50 dBm, WPA2 Personal, 802.11ax, channel 48
@@ -3654,7 +3685,7 @@ static NSString* HelpReadingsCaption(const CpuReadings* readings)
 
 // the help window's core graph hover labels, from the example's loads cycled over this Mac's CPUs, as barTipTextAt:
 // words them: when the graph splits (coreSplit), two images, one with the E-cores' label under the E reading and one
-// with the P-cores', each starting with its reading's line in place of its section's title; else one, the whole
+// with the P-cores', each its section's title with its reading (CoresTipText's titleValue); else one, the whole
 // label, under the core graph
 static NSArray<NSView*>* HelpCoresExamples(const CpuReadings* readings, const double* coreLoads, int coreLoadCount)
 {
@@ -3671,19 +3702,15 @@ static NSArray<NSView*>* HelpCoresExamples(const CpuReadings* readings, const do
   HelpCoreReadings(coreLoads, coreLoadCount, &read);
   if (coreSplit <= 0)
   {
-    NSString* text = TipPercents(CoresTipText(loads, cpuKinds, perBar, -1, 0, locale));
+    NSString* text = TipPercents(CoresTipText(loads, cpuKinds, perBar, -1, 0, nil, locale));
     return @[MenuRowsHelpExample(readings, coreLoads, coreLoadCount, MenuRowsExampleWhole, text, -1, @"the cores")];
   }
   NSMutableArray<NSView*>* examples = [NSMutableArray array];
   for (int kind=0; kind<2; kind++)
   {
     bool efficiency = (kind == 0);
-    NSString* cores = CoresTipText(loads, cpuKinds, perBar, -1, efficiency ? 'E' : 'P', locale);
-    NSRange title = [cores rangeOfString:@"\n"];
-    if (title.location != NSNotFound)
-    {
-      cores = [CoreKindReadingText(efficiency, efficiency ? read.efficiency : read.performance, locale) stringByAppendingString:[cores substringFromIndex:title.location]];
-    }
+    NSString* cores = CoresTipText(loads, cpuKinds, perBar, -1, efficiency ? 'E' : 'P',
+                                   CoreKindReadingValue(efficiency ? read.efficiency : read.performance, locale), locale);
     [examples addObject:MenuRowsHelpExample(readings, coreLoads, coreLoadCount, MenuRowsExampleWhole, TipPercents(cores),
                                             efficiency ? CpuRenderReadingEfficiency(CpuRenderReadingsShown(readings)) : CpuRenderReadingPerformance(CpuRenderReadingsShown(readings)),
                                             efficiency ? @"efficiency cores" : @"performance cores")];
@@ -3699,23 +3726,13 @@ static NSArray<NSView*>* HelpCoresExamples(const CpuReadings* readings, const do
 }
 
 // a reading's text, one value to a line (TipLines): "Disk usage:   72%", "Free:         279 GB", "Used:         716 GB",
-// "Total:        995 GB" (diskTipText); memory's, CPU's and the battery's the same way; an extra bar's, its class's barLabels entry; the core graph's, coresTipText, one kind's (split) with
-// that kind's reading, "Efficiency cores: 22%", in place of its section's title; empty when there is none
+// "Total:        995 GB" (diskTipText); memory's, CPU's, the battery's and the GPU's the same way; an extra bar's, its class's barLabels entry; the core graph's, coresTipText, one kind's (split) with
+// that kind's reading on its title's line, "Efficiency cores:   22%"; empty when there is none
 - (NSString*)barTipTextUnpaddedAt:(NSInteger)index
 {
   if (BarTipIsCores(index))
   {
-    NSString* cores = [self coresTipText:index];
-    if ((index == BAR_TIP_CORES_E) || (index == BAR_TIP_CORES_P))
-    {
-      NSRange title = [cores rangeOfString:@"\n"];
-      NSInteger reading = (index == BAR_TIP_CORES_E) ? CpuRenderReadingEfficiency(barTipMask) : CpuRenderReadingPerformance(barTipMask);
-      if (title.location != NSNotFound)
-      {
-        cores = [[self barTipTextUnpaddedAt:reading] stringByAppendingString:[cores substringFromIndex:title.location]];
-      }
-    }
-    return cores;
+    return [self coresTipText:index];
   }
   const NSInteger readingsCount = CpuRenderReadingsCount(barTipMask);
   if (index >= readingsCount)
@@ -3739,7 +3756,7 @@ static NSArray<NSView*>* HelpCoresExamples(const CpuReadings* readings, const do
     case CPU_RENDER_KIND_NEURAL_ENGINE:
       return NeuralEngineTipText(readingsNeuralEngine, readingsNeuralEngineBusy);
     case CPU_RENDER_KIND_GPU:
-      return GpuTipText(readingsGpu);
+      return GpuTipText(readingsGpu, readingsGpuWatts);
     case CPU_RENDER_KIND_EFFICIENCY:
     case CPU_RENDER_KIND_PERFORMANCE:
     {
