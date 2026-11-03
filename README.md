@@ -8,11 +8,11 @@ If you use the macOS Battery and Wi-Fi menu-bar items mainly to check their stat
 
 * **hiding in the menu bar:**
 
-![cpuTopBars Screenshot](Screenshot-menu.png)
+![cpuTopBars Screenshot](screenshots/Screenshot-menu.png)
 
 * **showing settings, readings and processes:**
 
-![cpuTopBars Screenshot](Screenshot-menu-preferences.png)
+![cpuTopBars Screenshot](screenshots/Screenshot-menu-preferences.png)
 
 ## 🚀 Features
 
@@ -38,7 +38,7 @@ Rest the pointer on a bar for a second and its reading shows below the menu bar.
 
 * **Battery:** the battery's charge, and whether it is charging, not charging, charged, or on battery, with the time left when macOS gives one.
 
-<img src="screenshots/hover-battery.png" width="258" alt="Battery label">
+<img src="screenshots/hover-battery.png" width="248" alt="Battery label">
 
 * **Wi-Fi:** while connected, the signal, then the IP address, router, MAC address, security, channel, noise, transmit rate and PHY mode; else whether Wi-Fi is off or not connected. In the picture the addresses are blacked out.
 
