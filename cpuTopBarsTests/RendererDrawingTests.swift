@@ -22,7 +22,6 @@
 
 import Testing
 import CoreGraphics
-import CoreText
 import Foundation
 
 // CpuRender into a bitmap, dark menu bar, no colour, tickWidth 4 and tickTotalWidth 6. Granularity 0 is one core bar on
@@ -183,25 +182,15 @@ extension FreeTests {
       }
     }
 
-    // the battery number's font, registered once from the app's sources: the hostless bundle has no app Resources
-    private static let batteryFont: Bool = {
-      let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-        .appendingPathComponent("cpuTopBars/Micro5-Regular.ttf")
-      return CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
-    }()
-
     // the battery alone, in a 120-wide image: its bar at x = 0 to 8, a reading's width, drawn last from DASHED_BOTTOM 2 in
-    // the dashed style and whole, without the dashes. Its digits, Micro 5 at 1 pt a pixel, 5 pt tall and 3 wide ("1" 2),
-    // are centred across it on whole points, x = 2 to 5 ("1" 3 to 5), and stacked from the top 1 pt apart, 1 pt above the
-    // centre: two digits are 11 pt, from height 4 ("87": the 7 at 4 to 9, the 8 at 10 to 15). Columns 0, 1, 6 and 7 never
-    // hold a digit
-    private func batteryReadings(_ charge: Double, charging: Bool = false, onAC: Bool = false, style: Int32 = 0) -> CpuReadings {
+    // the dashed style and whole, without the dashes. Its bolt, 4.25 x 5.7 pt, stands at x = 2.125 to 6.375 and heights 6.15
+    // to 11.85 at any charge; columns 0, 1 and 7 never hold it
+    private func batteryReadings(_ charge: Double, charging: Bool = false, onAC: Bool = false) -> CpuReadings {
       var r = readings(disk: -1)
       r.batteryShown = true
       r.battery = charge
       r.batteryCharging = charging
       r.batteryOnAC = onAC
-      r.batteryStyle = style
       return r
     }
 
@@ -209,64 +198,71 @@ extension FreeTests {
     private static let fullStates: [(name: String, charging: Bool, onAC: Bool)] =
       [("battery", false, false), ("charging", true, true), ("adapter", false, true)]
 
-    // the bolt's coverage of the pixel at x, y: the share of the way its green has gone from the fill's, read at height 3,
-    // below the bolt (the full fill is the same on every row), to the bolt's own, 255 white or 0 black, opaque. The fill's
-    // green is 189 or more from either in every state and style (dark: about 230 on the adapter in every style, checked by
-    // batteryFillColourFollowsThePowerState, 209 charging, 66 on battery; light: 0, 199, 56)
-    private func batteryBoltCoverage(_ image: Bitmap, scale: Int, white: Bool, x: Int, y: Int) -> Double {
-      let fill = Double(image.green(x: 0, y: 3 * scale))
-      return (Double(image.green(x: x, y: y)) - fill) / ((white ? 255.0 : 0.0) - fill)
+    // the bolt's colour in a power state, as 8-bit red, green and blue (_charging_color, _discharging_color): charging
+    // systemGreen, on battery systemRed, on the adapter and not charging black on a dark menu bar and white on a light one
+    private func batteryBoltColour(charging: Bool, onAC: Bool, light: Bool) -> [Double] {
+      if charging { return light ? [52, 199, 89] : [48, 209, 88] }
+      if !onAC { return light ? [255, 56, 60] : [255, 66, 69] }
+      return light ? [255, 255, 255] : [0, 0, 0]
     }
 
-    // the bolt's area in points at scale: its coverage summed over the bar's columns from height 2 up to the cap's row, 15
-    private func batteryBoltArea(_ image: Bitmap, scale: Int, columns: Int, white: Bool) -> Double {
+    // the bolt's coverage of the pixel at x, y: the share of the way the channel has gone from the fill's to the bolt's own,
+    // opaque. The fill is read at height 3, below the bolt (the full fill is the same on every row). The channel is the one
+    // where the two differ most: red or green by state (dark: the fill's 230 or, charging, 199 against green's 209 leaves
+    // only 10 on green, but 151 on red; light: the fill's 0 against battery's green 56 leaves red's 255), at least 151
+    private func batteryBoltCoverage(_ image: Bitmap, scale: Int, bolt: [Double], x: Int, y: Int) -> Double {
+      let fill = image.pixel(x: 0, y: 3 * scale).map { Double($0) }
+      let channel = (0..<3).max { abs(bolt[$0] - fill[$0]) < abs(bolt[$1] - fill[$1]) }!
+      return (Double(image.pixel(x: x, y: y)[channel]) - fill[channel]) / (bolt[channel] - fill[channel])
+    }
+
+    // the bolt's area in points at scale: its coverage summed over the bar's columns from height 2 up to the cap's rows, 14
+    private func batteryBoltArea(_ image: Bitmap, scale: Int, columns: Int, bolt: [Double]) -> Double {
       var area = 0.0
-      for y in (2 * scale)..<(15 * scale) {
-        for x in 0..<(columns * scale) { area += batteryBoltCoverage(image, scale: scale, white: white, x: x, y: y) }
+      for y in (2 * scale)..<(14 * scale) {
+        for x in 0..<(columns * scale) { area += batteryBoltCoverage(image, scale: scale, bolt: bolt, x: x, y: y) }
       }
       return area / Double(scale * scale)
     }
 
-    @Test(arguments: [Int32(0), 1, 2, 3], [1, 2])
-    func batteryFullBoltIsSolidInEveryStateAndStyle(style: Int32, scale: Int) {
-      // at 100% the fill covers the bar in every style, and the bolt is drawn over it solid, at full opacity, in every power
-      // state: white on battery's red and on the light menu bar's black adapter fill, black on charging's green and on the
-      // dark menu bar's white one. Its box at x = 2.125 to 6.375 and heights 6.15 to 11.85 (the 16 - 5.7 centred snaps to 5,
-      // raised 1, then the icon's 0.125 and 0.15), so columns 0, 1 and 7 and the rows from 2 to 5 and from 12 to 14 are the
-      // fill alone, pixel for pixel. The band across its middle, heights 8.5 to 9 and x = 3 to 5, is all bolt at 2x: opaque
-      // in the bolt's colour; at 1x its row 8 is mostly bolt at x = 3 and 4. At 2x, heights 11 to 11.5, the upper stroke,
-      // which leans right as the icon's does, holds x = 4.5 to 5 and not 3 to 3.5 (a bolt mirrored across would hold the
-      // second). Its area by its coverage is 8.37 pt² by its corners (the shoelace formula). Nothing stands below the bar or
-      // in the gap after it
+    @Test(arguments: [1, 2])
+    func batteryFullBoltIsSolidInEveryState(scale: Int) {
+      // at 100% the fill covers the bar, and the bolt is drawn over it solid, at full opacity, in the state's colour: green
+      // charging, red on battery, black on the adapter on a dark menu bar and white on a light one. Its box at x = 2.125 to
+      // 6.375 and heights 6.15 to 11.85 (the 16 - 5.7 centred snaps to 5, raised 1, then the icon's 0.125 and 0.15), so
+      // columns 0, 1 and 7 and the rows from 2 to 5 and from 12 to 13 are the fill alone, pixel for pixel. The band across
+      // its middle, heights 8.5 to 9 and x = 3 to 5, is all bolt at 2x: opaque in the bolt's colour; at 1x its row 8 is
+      // mostly bolt at x = 3 and 4. At 2x, heights 11 to 11.5, the upper stroke, which leans right as the icon's does,
+      // holds x = 4.5 to 5 and not 3 to 3.5 (a bolt mirrored across would hold the second). Its area by its coverage is
+      // 8.37 pt² by its corners (the shoelace formula). Nothing stands below the bar or in the gap after it
       for light in [false, true] {
         for state in Self.fullStates {
-          let white = !state.charging && (!state.onAC || light)
+          let bolt = batteryBoltColour(charging: state.charging, onAC: state.onAC, light: light)
           let image = render(bar: true, stripped: true, width: 120,
-                             readings: batteryReadings(1.0, charging: state.charging, onAC: state.onAC, style: style), light: light, scale: scale)
-          let label = "style \(style), scale \(scale), light \(light), \(state.name)"
+                             readings: batteryReadings(1.0, charging: state.charging, onAC: state.onAC), light: light, scale: scale)
+          let label = "scale \(scale), light \(light), \(state.name)"
           let fill = image.pixel(x: 0, y: 3 * scale)
           for x in [0, 1, 7].flatMap({ ($0 * scale)..<(($0 + 1) * scale) }) {
-            for y in (2 * scale)..<(15 * scale) { #expect(image.pixel(x: x, y: y) == fill, "\(label), column \(x), height \(y)") }
+            for y in (2 * scale)..<(14 * scale) { #expect(image.pixel(x: x, y: y) == fill, "\(label), column \(x), height \(y)") }
           }
-          for y in Array((2 * scale)..<(6 * scale)) + Array((12 * scale)..<(15 * scale)) {
+          for y in Array((2 * scale)..<(6 * scale)) + Array((12 * scale)..<(14 * scale)) {
             for x in 0..<(8 * scale) { #expect(image.pixel(x: x, y: y) == fill, "\(label), pixel \(x), \(y)") }
           }
           if scale == 2 {
-            let bolt: UInt8 = white ? 255 : 0
             for x in 6..<10 {
               let p = image.pixel(x: x, y: 17)
-              #expect(p == [bolt, bolt, bolt, 255], "\(label), band pixel \(x): \(p)")
+              #expect(p[3] == 255 && (0..<3).allSatisfy { abs(Double(p[$0]) - bolt[$0]) <= 1.5 }, "\(label), band pixel \(x): \(p)")
             }
-            let right = batteryBoltCoverage(image, scale: 2, white: white, x: 9, y: 22)
-            let left = batteryBoltCoverage(image, scale: 2, white: white, x: 6, y: 22)
+            let right = batteryBoltCoverage(image, scale: 2, bolt: bolt, x: 9, y: 22)
+            let left = batteryBoltCoverage(image, scale: 2, bolt: bolt, x: 6, y: 22)
             #expect(right > 0.875 && left < 0.125, "\(label), upper stroke: \(right) at x 9, \(left) at x 6")
           } else {
             for x in [3, 4] {
-              let c = batteryBoltCoverage(image, scale: 1, white: white, x: x, y: 8)
+              let c = batteryBoltCoverage(image, scale: 1, bolt: bolt, x: x, y: 8)
               #expect(c > 0.5, "\(label), band pixel \(x): \(c)")
             }
           }
-          let area = batteryBoltArea(image, scale: scale, columns: 8, white: white)
+          let area = batteryBoltArea(image, scale: scale, columns: 8, bolt: bolt)
           #expect(abs(area - 8.37) < 0.4, "\(label), bolt area \(area)")
           for x in 0..<(8 * scale) {
             for y in 0..<(2 * scale) { #expect(image.alpha(x: x, y: y) == 0, "\(label), below the bar, \(x), \(y)") }
@@ -278,12 +274,39 @@ extension FreeTests {
       }
     }
 
-    @Test(arguments: [Int32(0), 1, 2, 3], [1, 2])
-    func batteryCapCutsTheTopCorners(style: Int32, scale: Int) {
-      // every battery bar's top 1 pt, height 15 to 16, is cleared but for its middle half, each cut a quarter of the width
-      // on a device pixel: the Thick 8-pt bar's 2 pt, the Standard 6-pt's 1.5 (2 at 1x), the Thin 4-pt's 1. At every charge,
-      // full (the bolt), 62 and 20 (the digits) and not read (the background alone), in the solid and the dashed styles, in
-      // each power state, on either menu bar. Without digits the cut columns are drawn at height 14: the cap is 1 pt tall
+    @Test(arguments: [0.0, 0.3, 0.62], [1, 2])
+    func batteryBoltShowsBelowFullInTheStatesColour(charge: Double, scale: Int) {
+      // the bolt is drawn at any charge, not only at 100%, over the fill or over the bars' background above it (at 0 the fill
+      // is no rows high, at 0.3 its top, 2 + 4.2 snapped to 6, is under the bolt's 6.15). At 2x the band's pixels, x = 6 to
+      // 9 at height 8.5, are the bolt's opaque colour in each state and on either menu bar, and the hue is the state's:
+      // green dominant charging, red dominant on battery
+      for light in [false, true] {
+        for state in Self.fullStates {
+          let bolt = batteryBoltColour(charging: state.charging, onAC: state.onAC, light: light)
+          let image = render(bar: true, stripped: true, width: 120,
+                             readings: batteryReadings(charge, charging: state.charging, onAC: state.onAC), light: light, scale: scale)
+          let label = "charge \(charge), scale \(scale), light \(light), \(state.name)"
+          let band = scale == 2 ? [(6, 17), (7, 17), (8, 17), (9, 17)] : [(3, 8), (4, 8)]
+          for (x, y) in band {
+            let p = image.pixel(x: x, y: y).map { Double($0) }
+            guard scale == 2 else { continue }   // at 1x the band's pixels are blended, so only the outside check below reads
+            #expect(p[3] == 255 && (0..<3).allSatisfy { abs(p[$0] - bolt[$0]) <= 1.5 }, "\(label), band pixel \(x): \(p)")
+            if state.charging { #expect(p[1] > p[0] + 100 && p[1] > p[2] + 100, "\(label), green dominant, pixel \(x): \(p)") }
+            if !state.charging && !state.onAC { #expect(p[0] > p[1] + 150 && p[0] > p[2] + 150, "\(label), red dominant, pixel \(x): \(p)") }
+          }
+          // no bolt past the bar's columns 0 and 1 and 7: they are the fill or the background alone
+          let outside = image.pixel(x: 0, y: 9 * scale)
+          for x in [1, 7].map({ $0 * scale }) { #expect(image.pixel(x: x, y: 9 * scale) == outside, "\(label), column \(x)") }
+        }
+      }
+    }
+
+    @Test(arguments: [1, 2])
+    func batteryCapClearsTheTopTwoPointsInTheCutColumns(scale: Int) {
+      // every battery bar's top 2 pt, heights 14 and 15, are cleared but for its middle half, each cut a quarter of the
+      // width on a device pixel: the Thick 8-pt bar's 2 pt, the Standard 6-pt's 1.5 (2 at 1x), the Thin 4-pt's 1. At every
+      // charge, full, 62, 20 and not read (the background alone), in the solid and the dashed styles, in each power
+      // state, on either menu bar. The cut columns are still drawn at height 13, just under the cap
       for (tick, cut) in [(CGFloat(4), 2 * scale), (3, scale == 2 ? 3 : 2), (2, scale)] {
         let width = Int(2 * tick) * scale
         for charge in [1.0, 0.62, 0.2, -1] {
@@ -291,18 +314,16 @@ extension FreeTests {
             for light in [false, true] {
               for state in Self.fullStates {
                 let image = render(bar: true, stripped: stripped, width: 120,
-                                   readings: batteryReadings(charge, charging: state.charging, onAC: state.onAC, style: style),
+                                   readings: batteryReadings(charge, charging: state.charging, onAC: state.onAC),
                                    light: light, scale: scale, tickWidth: tick, tickTotalWidth: tick + 2)
-                let label = "style \(style), scale \(scale), width \(Int(2 * tick)), charge \(charge), stripped \(stripped), light \(light), \(state.name)"
+                let label = "scale \(scale), width \(Int(2 * tick)), charge \(charge), stripped \(stripped), light \(light), \(state.name)"
                 for x in 0..<width {
                   let corner = (x < cut) || (x >= width - cut)
-                  for y in (15 * scale)..<(16 * scale) {
+                  for y in (14 * scale)..<(16 * scale) {
                     let a = image.alpha(x: x, y: y)
                     #expect(corner ? (a == 0) : (a > 0), "\(label), pixel \(x), \(y): \(a)")
                   }
-                  if corner && (charge == 1.0 || charge < 0) {
-                    #expect(image.alpha(x: x, y: (15 * scale) - 1) > 0, "\(label), below the cap, column \(x)")
-                  }
+                  #expect(image.alpha(x: x, y: (14 * scale) - 1) > 0, "\(label), below the cap, column \(x)")
                 }
               }
             }
@@ -311,244 +332,106 @@ extension FreeTests {
       }
     }
 
-    @Test func batteryFullBoltShrinksOnAThinBar() {
+    @Test func batteryBoltShrinksOnAThinBar() {
       // Thin: tickWidth 2, so the battery's bar is 4 pt wide, under the bolt's 4.25: the bolt drawn at 4 / 4.25 of its size,
       // its area 8.37 x 0.886 = 7.41 pt², inside the bar (the slot's gap after it, from 4, stays clear), black on the
-      // adapter's white and white on the battery's red
-      for (onAC, white) in [(true, false), (false, true)] {
-        let image = render(bar: true, stripped: true, width: 120, readings: batteryReadings(1.0, onAC: onAC, style: 1), scale: 2,
+      // adapter's white and red on the battery's
+      for onAC in [true, false] {
+        let bolt = batteryBoltColour(charging: false, onAC: onAC, light: false)
+        let image = render(bar: true, stripped: true, width: 120, readings: batteryReadings(1.0, onAC: onAC), scale: 2,
                            tickWidth: 2, tickTotalWidth: 3)
-        let area = batteryBoltArea(image, scale: 2, columns: 4, white: white)
-        #expect(abs(area - 7.41) < 0.4, "white \(white), bolt area \(area)")
-        for x in 8..<10 { #expect(image.column(x).allSatisfy { $0 == 0 }, "white \(white), the gap after the thin bar, column \(x)") }
-      }
-    }
-
-    // the device rows of a two-digit number at scale: the lower digit's, the upper digit's, and the rows beside them that
-    // hold no digit (the row below the stack, the gap, the row above it). At 1x the centred 2.5 snaps to 3 and the raise
-    // adds 1: the stack is 4 to 15, rows 4 to 8, the gap row 9, rows 10 to 14. At 2x _snap keeps 2.5: 3.5 to 14.5 pt,
-    // rows 7 to 16, the gap rows 17 and 18, rows 19 to 28. Before the 1-pt raise and gap the digits were at rows 3 to 7
-    // and 9 to 13 at 1x, and at 2x, where the stack's 2.75 snapped to 3, at rows 6 to 15 and 17 to 26, the gap row 16
-    private func batteryDigitRows(scale: Int) -> (lower: Range<Int>, upper: Range<Int>, clear: [Int]) {
-      scale == 1 ? (4..<9, 10..<15, [3, 9, 15]) : (7..<17, 19..<29, [6, 17, 18, 29])
-    }
-
-    @Test(arguments: [Int32(0), 1, 2, 3], [1, 2])
-    func batteryNumberIsCutOutOfTheFill(style: Int32, scale: Int) {
-      #expect(Self.batteryFont)
-      // 87% on the adapter, on a dark bar: the fill to 2 + 0.87 * 14 = 14.18, its top snapped to a device pixel, so the 7 and
-      // all but the 8's top row stand in it and are cut out of it, in every style (the tint style cuts them out of the fill
-      // and draws them over the rest). Below the fill's top, which crosses row 14 at 1x and 28 at 2x, each digit row holds a cut-out
-      // pixel in the digits' columns, 2 to 4, and each clear row none; and those digit rows hold at least 12 cut-out
-      // points, 12 pixels at 1x and 48 at 2x
-      let image = render(bar: true, stripped: true, width: 120, readings: batteryReadings(0.87, onAC: true, style: style), scale: scale)
-      let rows = batteryDigitRows(scale: scale)
-      let top = 14 * scale
-      let columns = (2 * scale)..<(5 * scale)
-      var cut = 0
-      for y in Array(rows.lower) + Array(rows.upper) where y < top {
-        #expect(columns.contains { image.alpha(x: $0, y: y) == 0 }, "style \(style), scale \(scale), digit row \(y)")
-        cut += columns.filter { image.alpha(x: $0, y: y) == 0 }.count
-      }
-      #expect(cut >= 12 * scale * scale, "scale \(scale), cut-out pixels: \(cut)")
-      for y in rows.clear where y < top {
-        #expect(columns.allSatisfy { image.alpha(x: $0, y: y) > 200 }, "scale \(scale), clear row \(y)")
-      }
-      for x in [0, 1, 6, 7].flatMap({ ($0 * scale)..<(($0 + 1) * scale) }) {
-        for y in (2 * scale)..<top { #expect(image.alpha(x: x, y: y) > 200, "scale \(scale), column \(x), height \(y)") }
-      }
-      for x in 0..<(8 * scale) {
-        for y in 0..<(2 * scale) { #expect(image.alpha(x: x, y: y) == 0, "below the bar, scale \(scale), \(x), \(y)") }
-      }
-    }
-
-    @Test(arguments: [Int32(0), 1, 2, 3])
-    func batteryFillColourFollowsThePowerState(style: Int32) {
-      #expect(Self.batteryFont)
-      for light in [false, true] {
-        let battery = render(bar: true, stripped: true, width: 120, readings: batteryReadings(1.0, style: style), light: light)
-        let charging = render(bar: true, stripped: true, width: 120, readings: batteryReadings(1.0, charging: true, onAC: true, style: style), light: light)
-        let adapter = render(bar: true, stripped: true, width: 120, readings: batteryReadings(1.0, onAC: true, style: style), light: light)
-        // on battery systemRed and charging systemGreen, both at full opacity; on the adapter the text colour at 0.9 alone
-        // in every style (alpha about 230, as Wi-Fi's lit segments and the Neural Engine's bar), not over the background,
-        // which made it brighter than the system's icons
-        #expect(battery.alpha(x: 0, y: 8) == 255 && battery.red(x: 0, y: 8) > battery.green(x: 0, y: 8), "light \(light)")
-        #expect(charging.alpha(x: 0, y: 8) == 255 && charging.green(x: 0, y: 8) > charging.red(x: 0, y: 8), "light \(light)")
-        let a = Int(adapter.alpha(x: 0, y: 8))
-        #expect(abs(a - 230) <= 1 && adapter.red(x: 0, y: 8) == adapter.green(x: 0, y: 8), "style \(style), light \(light): alpha \(a)")
-        #expect(Int(adapter.red(x: 0, y: 8)) == (light ? 0 : a), "white on a dark menu bar, black on a light one")
+        let area = batteryBoltArea(image, scale: 2, columns: 4, bolt: bolt)
+        #expect(abs(area - 7.41) < 0.4, "adapter \(onAC), bolt area \(area)")
+        for x in 8..<10 { #expect(image.column(x).allSatisfy { $0 == 0 }, "adapter \(onAC), the gap after the thin bar, column \(x)") }
       }
     }
 
     @Test(arguments: [false, true], [1, 2])
-    func batteryTintNumberOnTheAdapterIsTheTextColourAlone(light: Bool, scale: Int) {
-      #expect(Self.batteryFont)
-      // the tint style, 20% on the adapter in the solid style: the fill below the stack, so "20" stands over the background
-      // (white or black at 0.3, alpha 77), cut out of it and drawn in the text colour at 0.9 alone: alpha about 230, white
-      // on a dark bar and black on a light one (over the background it was 238)
-      let image = render(bar: true, stripped: false, width: 120, readings: batteryReadings(0.2, onAC: true, style: 3), light: light, scale: scale)
-      let rows = batteryDigitRows(scale: scale)
-      let columns = (2 * scale)..<(5 * scale)
-      for y in Array(rows.lower) + Array(rows.upper) {
-        let digit = columns.filter { image.alpha(x: $0, y: y) > 200 }
-        #expect(!digit.isEmpty, "scale \(scale), digit row \(y)")
-        for x in digit {
+    func batteryFillIsTheTextColourAtNinetyPercentAlone(light: Bool, scale: Int) {
+      // 62% on the adapter, not charging: the fill's top, 2 + 8.68 snapped to a device pixel (height 11 at 1x), and under it
+      // the text colour at 0.9 opacity alone (alpha about 230, white on a dark bar and black on a light one), not over the
+      // bars' background, which made it brighter than the system's icons; above it the background alone (the bars' grey,
+      // 0.8 at 0.3 on a dark bar, alpha about 77 and red about 61, and 0.2 at 0.12 on a light one, about 31 and 6). Read in columns
+      // 0 and 1, clear of the bolt, from height 3 to 10 (the fill) and 12 to 13 (above it)
+      let image = render(bar: true, stripped: true, width: 120, readings: batteryReadings(0.62, onAC: true), light: light, scale: scale)
+      for x in [0, 1].map({ $0 * scale }) {
+        for y in (3 * scale)..<(10 * scale) {
           let a = Int(image.alpha(x: x, y: y))
-          #expect(abs(a - 230) <= 1 && Int(image.red(x: x, y: y)) == (light ? 0 : a), "scale \(scale), column \(x), height \(y): alpha \(a)")
+          #expect(abs(a - 230) <= 1 && Int(image.red(x: x, y: y)) == (light ? 0 : a), "light \(light), fill, column \(x), height \(y): alpha \(a)")
+        }
+        for y in (12 * scale)..<(14 * scale) {
+          let a = Int(image.alpha(x: x, y: y))
+          let r = Int(image.red(x: x, y: y))
+          #expect(abs(a - (light ? 31 : 77)) <= 2 && abs(r - (light ? 6 : 61)) <= 2, "light \(light), background, column \(x), height \(y): alpha \(a), red \(r)")
+        }
+      }
+    }
+
+    @Test(arguments: [false, true])
+    func batteryChargingShowsALighterFillUnderTheTextColourAbove(light: Bool) {
+      // 50% while charging: above the fill's top (2 + 7 = 9) the text colour at 0.9 opacity (alpha about 230), and the fill
+      // under it at CPU_RENDER_BATTERY_CHARGING_LEVEL, 0.78 (alpha about 199), so the charge shows on a bar white (black on a
+      // light menu bar) to its top: on a dark bar the area above is brighter than the fill, on a light one darker, and both
+      // are the text colour, opaque-ish, not the faint background. Not charging, the same charge: the fill 0.9 and above it
+      // the bars' background, alpha about 77 (31 on a light bar). Columns 0 and 1, clear of the bolt
+      let charging = render(bar: true, stripped: true, width: 120, readings: batteryReadings(0.5, charging: true, onAC: true), light: light)
+      let discharging = render(bar: true, stripped: true, width: 120, readings: batteryReadings(0.5, onAC: true), light: light)
+      for x in [0, 1] {
+        for (fillY, aboveY) in [(3, 11), (5, 12), (8, 13)] {
+          let (fill, above) = (Int(charging.alpha(x: x, y: fillY)), Int(charging.alpha(x: x, y: aboveY)))
+          #expect(abs(fill - 199) <= 1 && abs(above - 230) <= 1, "light \(light), charging, column \(x): fill \(fill), above \(above)")
+          #expect(above > fill, "light \(light), charging: above \(above) over the fill \(fill)")
+          // white premultiplied by its alpha on a dark bar, black on a light one
+          #expect(Int(charging.red(x: x, y: fillY)) == (light ? 0 : fill) && Int(charging.red(x: x, y: aboveY)) == (light ? 0 : above),
+                  "light \(light), charging, column \(x): the text colour")
+          let (plain, faint) = (Int(discharging.alpha(x: x, y: fillY)), Int(discharging.alpha(x: x, y: aboveY)))
+          #expect(abs(plain - 230) <= 1, "light \(light), not charging, fill \(plain)")
+          #expect(abs(faint - (light ? 31 : 77)) <= 2, "light \(light), not charging, background above \(faint)")
         }
       }
     }
 
     @Test(arguments: [false, true], [1, 2])
-    func batteryTintNumberOverTheEmptyBarIsAShadeOfTheFill(light: Bool, scale: Int) {
-      #expect(Self.batteryFont)
-      // the tint style, 20% on battery in the solid style: the fill to height 3.2, snapped to 3 (6 at 2x), below the stack,
-      // so "20" stands over the background alone (red at 0.38 opacity, alpha 97). Each digit row holds a digit pixel (alpha
-      // 255) in the digits' columns, 2 to 4, in systemRed mixed 60% toward white on a dark bar (red 255, green about 179:
-      // 66 + 189 x 0.6; the white or black of the text colour, or the plain fill (green 66 dark, 56 light), would fail) and 45%
-      // toward black on a light one (red about 140, green about 31), and each clear row none: the background alone, alpha
-      // 97, row 3 at 1x and 6 at 2x
-      let image = render(bar: true, stripped: false, width: 120, readings: batteryReadings(0.2, style: 3), light: light, scale: scale)
-      let rows = batteryDigitRows(scale: scale)
-      let columns = (2 * scale)..<(5 * scale)
-      for y in Array(rows.lower) + Array(rows.upper) {
-        let digit = columns.filter { image.alpha(x: $0, y: y) > 200 }
-        #expect(!digit.isEmpty, "scale \(scale), digit row \(y)")
-        for x in digit {
-          let (red, green) = (Int(image.red(x: x, y: y)), Int(image.green(x: x, y: y)))
-          #expect(light ? (abs(red - 140) <= 3 && abs(green - 31) <= 3) : (red == 255 && abs(green - 179) <= 3),
-                  "scale \(scale), column \(x), height \(y): red \(red), green \(green)")
-        }
-      }
-      for y in rows.clear {
-        #expect(columns.allSatisfy { image.alpha(x: $0, y: y) <= 200 }, "scale \(scale), clear row \(y)")
-      }
-      for x in [0, 1, 6, 7].flatMap({ ($0 * scale)..<(($0 + 1) * scale) }) {
-        for y in (4 * scale)..<(15 * scale) {   // height 15 is the cap's (batteryCapCutsTheTopCorners)
-          #expect(abs(Int(image.alpha(x: x, y: y)) - 97) <= 2, "scale \(scale), column \(x), height \(y)")
-        }
-      }
-    }
-
-    @Test(arguments: [Int32(0), 1, 2, 3], [1, 2])
-    func batteryDigitsAndWifiSegmentsSitOnWholePixels(style: Int32, scale: Int) {
-      #expect(Self.batteryFont)
-      // at 1x and 2x every edge of the digits, of the battery's fill and of the Wi-Fi segments falls on a device pixel, so
-      // no pixel of the battery's or Wi-Fi's bar is a blend: each alpha is one the style can produce, within 2: clear (the
-      // cut-out digits), Wi-Fi's background 77 and fill 230, the battery's background (light tint 255, grey 153, light grey
-      // 191, tint 97), its fill 255 and its digits 255 (the light tint's, the tint style's above the fill). A half-covered
-      // pixel would read between them. Dark bar, battery, charges 0.5 (the fill's top on a whole point in both styles: 8,
-      // and 2 + 7 = 9), 0.62 and 0.2 (tops of 9.92 and 3.2 solid, 2 + 8.68 and 2 + 2.8 dashed, snapped to device pixels; left
-      // unsnapped, their top rows would blend); the other alphas are 0 and 255 at the edges the cut-outs touch. On the adapter
-      // too, where the background starts at the fill's top: its background (light tint 140, grey 153, light grey 191, tint 77)
-      // and its fill and the tint style's digits above it, 230
-      let background = [Int32(255), 153, 191, 97][Int(style)]
-      let adapterBackground = [Int32(140), 153, 191, 77][Int(style)]
-      for (charge, onAC) in [0.5, 0.62, 0.2].flatMap({ c in [(c, false), (c, true)] }) {
-        let allowed = [0, 77, 230, 255, Int(onAC ? adapterBackground : background)]
-        var r = batteryReadings(charge, onAC: onAC, style: style)
-        r.wifiShown = true
-        r.wifi = 0.5
-        for stripped in [false, true] {
-          let image = render(bar: true, stripped: stripped, width: 120, readings: r, scale: scale)
-          for x in 0..<(18 * scale) {
-            for y in 0..<(16 * scale) {
-              let a = Int(image.alpha(x: x, y: y))
-              #expect(allowed.contains { abs($0 - a) <= 2 }, "style \(style), scale \(scale), charge \(charge), adapter \(onAC), stripped \(stripped), pixel \(x), \(y): \(a)")
+    func batteryFillAndWifiSegmentsSitOnWholePixels(light: Bool, scale: Int) {
+      // at 1x and 2x every edge of the battery's fill and of the Wi-Fi segments falls on a device pixel, so no pixel of the
+      // battery's or Wi-Fi's bar outside the bolt's box is a blend: each alpha is one the bar can produce, within 2: clear
+      // (the cap's cuts), Wi-Fi's background 77 and fill 230, the battery's background 77 (31 on a light bar), its fill 230
+      // (199 charging). A half-covered pixel would read between them. Charges 0.5 (the fill's top on a whole point: 2 + 7),
+      // 0.62 and 0.2 (tops of 2 + 8.68 and 2 + 2.8, snapped to device pixels; left unsnapped, their top rows would blend),
+      // in each power state. Columns 0, 1 and 7 of the battery's bar (the bolt's box is x = 2.125 to 6.375) and Wi-Fi's bar,
+      // x = 10 to 18
+      for charge in [0.5, 0.62, 0.2] {
+        for state in Self.fullStates {
+          let allowed = [0, 77, 230, 199, 31]
+          var r = batteryReadings(charge, charging: state.charging, onAC: state.onAC)
+          r.wifiShown = true
+          r.wifi = 0.5
+          for stripped in [false, true] {
+            let image = render(bar: true, stripped: stripped, width: 120, readings: r, light: light, scale: scale)
+            let columns = Array(0..<(2 * scale)) + Array((7 * scale)..<(8 * scale)) + Array((10 * scale)..<(18 * scale))
+            for x in columns {
+              for y in 0..<(16 * scale) {
+                let a = Int(image.alpha(x: x, y: y))
+                #expect(allowed.contains { abs($0 - a) <= 2 }, "scale \(scale), light \(light), charge \(charge), \(state.name), stripped \(stripped), pixel \(x), \(y): \(a)")
+              }
             }
           }
         }
       }
     }
 
-    @Test(arguments: [Int32(0), 1, 2, 3])
-    func batteryNotReadDrawsOnlyTheBarBackground(style: Int32) {
-      let image = render(bar: true, stripped: true, width: 120, readings: batteryReadings(-1, style: style))
+    @Test func batteryNotReadDrawsOnlyTheBarBackgroundAndCap() {
+      let image = render(bar: true, stripped: true, width: 120, readings: batteryReadings(-1))
       for x in 0..<8 {
         let column = image.column(x)
         #expect(column[0] == 0 && column[1] == 0)
-        for y in 2..<15 { #expect(column[y] > 0 && column[y] < 127, "column \(x), height \(y): \(column[y])") }
-        // the cap: height 15 cleared at the corners, x = 0, 1, 6 and 7
+        for y in 2..<14 { #expect(column[y] > 0 && column[y] < 127, "column \(x), height \(y): \(column[y])") }
+        // the cap: heights 14 and 15 cleared at the corners, x = 0, 1, 6 and 7
         let corner = (x < 2) || (x >= 6)
-        #expect(corner ? (column[15] == 0) : (column[15] > 0 && column[15] < 127), "column \(x), height 15: \(column[15])")
+        for y in [14, 15] { #expect(corner ? (column[y] == 0) : (column[y] > 0 && column[y] < 127), "column \(x), height \(y): \(column[y])") }
       }
-    }
-
-    // the battery at 62% on battery, in the dashed style, 1x: the fill's height 0.62 * 14 = 8.68, snapped to 9, so rows 2 to 10;
-    // the digits "62": the 2 at rows 4 to 8 and the 6 at rows 10 to 14, both with a pixel at x = 3 on rows 4, 6, 8, 12 and 14
-    // (the 6's row 10 is in the fill, rows 11 to 14 above it). So (3, 4), (3, 6) and (3, 8) are digit pixels on the fill, (3, 12)
-    // and (3, 14) digit pixels above it, and x = 0 is the bar with no digit: the fill at y = 6, the background at y = 12
-    private func batteryDigits(style: Int32, light: Bool, charging: Bool = false, onAC: Bool = false) -> Bitmap {
-      render(bar: true, stripped: true, width: 120, readings: batteryReadings(0.62, charging: charging, onAC: onAC, style: style), light: light)
-    }
-
-    @Test func batteryLightTintOnADarkBarIsOpaqueAndPinkerThanTheFill() {
-      #expect(Self.batteryFont)
-      // systemRed on a dark bar is (255, 66, ...); the background is that mixed 55% toward white: green about 170, alpha 255
-      // (measured: the fill 255/255/66 as alpha/red/green, the background 255/255/170). The digits are cut out: alpha 0, on
-      // the fill and above it
-      let image = batteryDigits(style: 0, light: false)
-      #expect(image.alpha(x: 0, y: 12) == 255 && image.alpha(x: 0, y: 6) == 255)
-      #expect(image.green(x: 0, y: 12) > image.green(x: 0, y: 6) + 60, "background \(image.green(x: 0, y: 12)), fill \(image.green(x: 0, y: 6))")
-      #expect(abs(Int(image.green(x: 0, y: 12)) - 170) <= 2 && abs(Int(image.green(x: 0, y: 6)) - 66) <= 2)
-      for y in [4, 6, 8] { #expect(image.alpha(x: 3, y: y) == 0, "digit on the fill, height \(y)") }
-      for y in [12, 14] { #expect(image.alpha(x: 3, y: y) == 0, "digit above the fill, height \(y)") }
-    }
-
-    @Test(arguments: [false, true])
-    func batteryLightTintOnALightBarHasBlackDigitsWhenColoured(charging: Bool) {
-      #expect(Self.batteryFont)
-      // light menu bar, on battery or charging: the digits are black at 0.9 opacity over the fill and over the tint, none cut
-      // out: alpha 255, red and green under 40 (measured: 25 and 5 to 16 on battery, 5 to 23 charging)
-      let image = batteryDigits(style: 0, light: true, charging: charging, onAC: charging)
-      for (x, y) in [(3, 4), (3, 6), (3, 8), (3, 12), (3, 14)] {
-        #expect(image.alpha(x: x, y: y) == 255, "charging \(charging), pixel \(x), \(y)")
-        #expect(image.red(x: x, y: y) < 40 && image.green(x: x, y: y) < 40, "charging \(charging), pixel \(x), \(y)")
-      }
-      // the background: the fill mixed 55% toward white, opaque. On battery systemRed (255, 56, ...) gives green
-      // about 166 (0.22 + 0.78 x 0.55); charging systemGreen (52, 199, ...) gives red about 164 and green about 230
-      let (alpha, red, green) = (Int(image.alpha(x: 0, y: 12)), Int(image.red(x: 0, y: 12)), Int(image.green(x: 0, y: 12)))
-      #expect(alpha == 255, "charging \(charging): background alpha \(alpha)")
-      #expect(charging ? (abs(red - 164) <= 3 && abs(green - 230) <= 3) : (red == 255 && abs(green - 166) <= 3),
-              "charging \(charging): background red \(red), green \(green)")
-    }
-
-    @Test func batteryLightTintOnALightBarOnTheAdapterCutsTheDigitsOut() {
-      #expect(Self.batteryFont)
-      // neutral (on the adapter, not charging): the tint is the bars' grey at 0.55 and the fill the text colour, so the digits
-      // are cut out as on a dark bar
-      let image = batteryDigits(style: 0, light: true, onAC: true)
-      for (x, y) in [(3, 4), (3, 6), (3, 8), (3, 12), (3, 14)] { #expect(image.alpha(x: x, y: y) == 0, "pixel \(x), \(y)") }
-      #expect(image.alpha(x: 0, y: 12) > 0 && image.alpha(x: 0, y: 6) > 0)
-    }
-
-    @Test(arguments: [(Int32(1), 153), (Int32(2), 191)])
-    func batteryGreyStylesHaveTheirBackgroundOpacityAndCutOutDigits(style: Int32, alpha: Int) {
-      #expect(Self.batteryFont)
-      // the bars' grey at 0.60 (alpha 153) and 0.75 (191) above the fill; the digits cut out everywhere
-      let image = batteryDigits(style: style, light: false)
-      for y in [11, 12, 13, 14] { #expect(abs(Int(image.alpha(x: 0, y: y)) - alpha) <= 2, "style \(style), height \(y): \(image.alpha(x: 0, y: y))") }
-      #expect(image.alpha(x: 0, y: 6) == 255, "the fill")
-      for y in [4, 6, 8, 12, 14] { #expect(image.alpha(x: 3, y: y) == 0, "style \(style), digit at height \(y)") }
-    }
-
-    @Test(arguments: [Int32(99), -1, 4])
-    func batteryStyleZeroedOrUnknownDrawsTheLightTint(style: Int32) {
-      #expect(Self.batteryFont)
-      for light in [false, true] {
-        for (charging, onAC) in [(false, false), (true, true), (false, true)] {
-          let tint = batteryDigits(style: 0, light: light, charging: charging, onAC: onAC)
-          let other = batteryDigits(style: style, light: light, charging: charging, onAC: onAC)
-          #expect(tint.bytes == other.bytes, "style \(style), light \(light), charging \(charging), adapter \(onAC)")
-        }
-      }
-      // a zeroed struct is style 0 as well: batteryReadings sets the style, so build one that does not
-      var r = readings(disk: -1)
-      r.batteryShown = true
-      r.battery = 0.62
-      #expect(r.batteryStyle == 0)
-      let zeroed = render(bar: true, stripped: true, width: 120, readings: r)
-      #expect(zeroed.bytes == batteryDigits(style: 0, light: false).bytes)
+      // no bolt: every pixel of the bar's columns 2 to 5 at height 8 is the background alone, alpha about 77
+      for x in 2..<6 { #expect(abs(Int(image.alpha(x: x, y: 8)) - 77) <= 2, "no bolt, column \(x)") }
     }
 
     @Test(arguments: [(1.0, 5), (0.5, 3), (0.4, 2), (0.0, 1), (-1.0, 0)])
@@ -702,7 +585,7 @@ extension FreeTests {
 
     @Test func everyLetterIsItsFiveByFiveBitmap() {
       // all nine readings shown, each bar 8 pt wide (tickWidth 4, tickTotalWidth 6) at 1x: each letter's 5 x 5 pixels at
-      // heights 0 to 4 from x + 1, read top row first, are its bitmap; N has its diagonal, unlike Micro 5's 3-wide N
+      // heights 0 to 4 from x + 1, read top row first, are its bitmap; N has its diagonal
       let letters: [(String, [String])] = [
         ("B", ["####.", "#...#", "####.", "#...#", "####."]),
         ("W", ["#.#.#", "#.#.#", "#.#.#", "#.#.#", ".#.#."]),

@@ -101,42 +101,6 @@ static NSString* ShowGpuNeuralEngineKey = @"ShowGpuNeuralEngine";
 static NSString* ShowBatteryWifiKey = @"ShowBatteryWifi";
 static NSString* ShowBarLettersKey = @"ShowBarLetters";
 static NSString* TopRowsKey = @"TopRowsKey";
-static NSString* BatteryStyleKey = @"BatteryStyle";
-
-// the battery bar's styles Settings offers, in its segments' order: each one's label, its value under BatteryStyleKey and
-// its CPU_RENDER_BATTERY_* style. Light tint is the default, also for a value this version does not know
-static NSString* const batteryStyleLabels[] = {@"Grey", @"Light grey", @"Tint", @"Light tint"};
-static NSString* const batteryStyleNames[] = {@"grey", @"lightGrey", @"tint", @"lightTint"};
-static const int batteryStyles[] = {CPU_RENDER_BATTERY_GREY, CPU_RENDER_BATTERY_LIGHT_GREY, CPU_RENDER_BATTERY_TINT, CPU_RENDER_BATTERY_LIGHT_TINT};
-#define BATTERY_STYLE_CHOICES (sizeof(batteryStyles)/sizeof(batteryStyles[0]))
-static int batteryStyle = CPU_RENDER_BATTERY_LIGHT_TINT;  // the battery bar's style (BatteryStyleKey)
-
-// the style stored under BatteryStyleKey
-static int BatteryStyleFromDefaults(void)
-{
-  NSString* name = [[NSUserDefaults standardUserDefaults] stringForKey:BatteryStyleKey];
-  for (NSUInteger n=0; n<BATTERY_STYLE_CHOICES; n++)
-  {
-    if ([batteryStyleNames[n] isEqualToString:name])
-    {
-      return batteryStyles[n];
-    }
-  }
-  return CPU_RENDER_BATTERY_LIGHT_TINT;
-}
-
-// the Battery style segment of the current style
-static NSInteger BatteryStyleChoiceIndex(void)
-{
-  for (NSUInteger n=0; n<BATTERY_STYLE_CHOICES; n++)
-  {
-    if (batteryStyles[n] == batteryStyle)
-    {
-      return (NSInteger)n;
-    }
-  }
-  return -1;
-}
 
 #pragma mark - C APIs
 
@@ -1381,8 +1345,6 @@ typedef struct HelpExampleStyle
   if (_hasReadings)
   {
     _readings = *readings;
-    // the battery in the style Settings has, in every section's examples, a build's own included
-    _readings.batteryStyle = batteryStyle;
     HelpCoreReadings(coreLoads, coreLoadCount, &_readings);
     int count = MAX(_readings.extraCount, 0);
     _readings.extraCount = count;
@@ -1855,7 +1817,7 @@ static NSWindow* MakeHelpWindow(void)
       @[MenuRowsHelpExample(&withGpu, loads, loadCount, MenuRowsExampleReadings, nil, -1, HelpReadingsCaption(&withGpu))],
     ],
     @[
-      @"On a Mac with a battery, the first bar is the battery, shaped as one by a cap at its top: filled to its charge, red on battery, green while it charges, and white (black on a light menu bar) while it is plugged in and not charging, with the charge in percent written down the bar in small digits below 100%; at 100%, plugged in or not, a lightning bolt takes their place, black on the green or white fill and white on the red or black one. Next is Wi-Fi: its five segments light from the bottom with the signal, one at -78 dBm or weaker, one more for each 12 dB stronger, and all five from -41 dBm; with Wi-Fi off or not connected only its faint segments show. A small gap then sets battery, Wi-Fi, disk and memory apart from the Neural Engine, GPU and CPU. The network's name is not shown, so the app asks for no Location Services permission.",
+      @"On a Mac with a battery, the first bar is the battery, shaped as one by a cap at its top: filled to its charge in white (black on a light menu bar) over the faint background, with a lightning bolt over it, red on battery, green while it charges, and black (white on a light menu bar) while it is plugged in and not charging. While it charges the whole battery is white (black on a light menu bar), the charge a shade dimmer. Next is Wi-Fi: its five segments light from the bottom with the signal, one at -78 dBm or weaker, one more for each 12 dB stronger, and all five from -41 dBm; with Wi-Fi off or not connected only its faint segments show. A small gap then sets battery, Wi-Fi, disk and memory apart from the Neural Engine, GPU and CPU. The network's name is not shown, so the app asks for no Location Services permission.",
       @[
         MenuRowsHelpExample(&charging, loads, loadCount, MenuRowsExampleReadings, nil, -1, @"charging"),
         MenuRowsHelpExample(&pluggedIn, loads, loadCount, MenuRowsExampleReadings, nil, -1, @"plugged in, not charging"),
@@ -1879,7 +1841,7 @@ static NSWindow* MakeHelpWindow(void)
       hoverExamples,
     ],
     @[
-      @"In Settings, \"Show Disk, RAM, CPU, E-core, P-core bars\" turns the wide bars off and leaves the core bars, \"Show battery and Wi-Fi bars\" turns those two off, \"Battery style\" sets the battery bar's background (Grey or Light grey; Tint, its fill's colour dimmed, the digits above the charge a shade of it; or Light tint, the default, a pale shade of its fill's colour), \"Show GPU and Neural Engine bars\" those two, \"Show letters under the bars\" the letter under each wide bar (B battery, W Wi-Fi, D disk, M memory, N Neural Engine, G GPU, C CPU, E and P the efficiency and performance cores), and \"Refresh\" sets how often the bars move.",
+      @"In Settings, \"Show Disk, RAM, CPU, E-core, P-core bars\" turns the wide bars off and leaves the core bars, \"Show battery and Wi-Fi bars\" turns those two off, \"Show GPU and Neural Engine bars\" those two, \"Show letters under the bars\" the letter under each wide bar (B battery, W Wi-Fi, D disk, M memory, N Neural Engine, G GPU, C CPU, E and P the efficiency and performance cores), and \"Refresh\" sets how often the bars move.",
       @[
         MenuRowsHelpExample(&engineOff, loads, loadCount, MenuRowsExampleWhole, nil, -1, @"bars on"),
         MenuRowsHelpExample(&barsOff, loads, loadCount, MenuRowsExampleWhole, nil, -1, @"bars off"),
@@ -2097,7 +2059,6 @@ static NSSegmentedControl* topRowsChoice = nil;  // Top processes: its segments'
 static NSSwitch* showBarsSwitch = nil;           // Show Disk, RAM, CPU, E-core, P-core bars
 static NSSwitch* showGpuSwitch = nil;            // Show GPU and Neural Engine bars
 static NSSwitch* showBatteryWifiSwitch = nil;    // Show battery and Wi-Fi bars
-static NSSegmentedControl* batteryStyleChoice = nil;  // Battery style: its segments' styles are batteryStyles
 static NSSwitch* showBarLettersSwitch = nil;     // Show letters under the bars
 static NSSwitch* loginSwitch = nil;              // Launch at login
 static const int topRowsChoices[] = {3, 5, 10, TOP_COUNT};
@@ -2289,8 +2250,6 @@ static NSMutableSet<NSTask*>* runningTasks = nil;
   showGpuSwitch.enabled = showBars;
   showBatteryWifiSwitch.state = showBatteryWifi ? NSControlStateValueOn : NSControlStateValueOff;
   showBatteryWifiSwitch.enabled = showBars;
-  batteryStyleChoice.selectedSegment = BatteryStyleChoiceIndex();
-  batteryStyleChoice.enabled = showBars && showBatteryWifi;
   showBarLettersSwitch.state = showBarLetters ? NSControlStateValueOn : NSControlStateValueOff;
   showBarLettersSwitch.enabled = showBars;
   topRowsChoice.selectedSegment = TopRowsChoiceIndex();
@@ -2762,20 +2721,12 @@ static NSString* OthersRowText(int count)
   showGpuSwitch.enabled = showBars;
   showBatteryWifiSwitch = MenuRowsSettingsSwitch(showBatteryWifi, @selector(showBatteryWifiButtonClicked:), self);
   showBatteryWifiSwitch.enabled = showBars;
-  NSMutableArray<NSString*>* batteryStyleTitles = [[NSMutableArray alloc] init];
-  for (NSUInteger n=0; n<BATTERY_STYLE_CHOICES; n++)
-  {
-    [batteryStyleTitles addObject:batteryStyleLabels[n]];
-  }
-  batteryStyleChoice = MenuRowsSettingsChoice(batteryStyleTitles, 70.0, BatteryStyleChoiceIndex(), @selector(batteryStyleChoiceChanged:), self);
-  batteryStyleChoice.enabled = showBars && showBatteryWifi;
   showBarLettersSwitch = MenuRowsSettingsSwitch(showBarLetters, @selector(showBarLettersButtonClicked:), self);
   showBarLettersSwitch.enabled = showBars;
   place(SettingsGroup(@[@[@"Refresh", refreshChoice],
                         @[@"Top processes", topRowsChoice],
                         @[@"Show Disk, RAM, CPU, E-core, P-core bars", showBarsSwitch],
                         @[@"Show battery and Wi-Fi bars", showBatteryWifiSwitch],
-                        @[@"Battery style", batteryStyleChoice],
                         @[@"Show GPU and Neural Engine bars", showGpuSwitch],
                         @[@"Show letters under the bars", showBarLettersSwitch]]), 0.0, SETTINGS_SECTION_GAP);
 
@@ -4260,7 +4211,6 @@ static void WifiRead(SystemInfoWifi* wifi, bool full)
       readings.battery = readingsBatteryState.level;
       readings.batteryCharging = readingsBatteryState.charging;
       readings.batteryOnAC = readingsBatteryState.onAC;
-      readings.batteryStyle = batteryStyle;
     }
     readings.wifi = readingsWifi.connected ? SystemInfoWifiFill(readingsWifi.rssi) : -1.0;
     readings.gpu = readingsGpu;
@@ -4587,7 +4537,6 @@ static double TopInterval(void)
   [[NSUserDefaults standardUserDefaults] registerDefaults:@{ShowBatteryWifiKey:@YES}];
   [[NSUserDefaults standardUserDefaults] registerDefaults:@{ShowBarLettersKey:@YES}];
   [[NSUserDefaults standardUserDefaults] registerDefaults:@{TopRowsKey:@5}];
-  [[NSUserDefaults standardUserDefaults] registerDefaults:@{BatteryStyleKey:@"lightTint"}];
 
   // Settings no longer offers granularity, style, line, width, appearance or theme: each takes its old default,
   // whatever an earlier version (1.0 included) stored under its key, which is left in place
@@ -4602,7 +4551,6 @@ static double TopInterval(void)
   showGpuNeuralEngine = [[NSUserDefaults standardUserDefaults] boolForKey:ShowGpuNeuralEngineKey];
   showBatteryWifi = [[NSUserDefaults standardUserDefaults] boolForKey:ShowBatteryWifiKey];
   showBarLetters = [[NSUserDefaults standardUserDefaults] boolForKey:ShowBarLettersKey];
-  batteryStyle = BatteryStyleFromDefaults();
   topShown = TopRows();
 
   [self updateRendererParameters];
@@ -4943,13 +4891,6 @@ static NSTimeInterval TopDelay(void)
     if ((fontURL == nil) || !CTFontManagerRegisterFontsForURL((__bridge CFURLRef)fontURL, kCTFontManagerScopeProcess, &fontError))
     {
       NSLog(@"the menu font did not load (%@); the system's monospaced font stands in", (fontError != NULL) ? (__bridge_transfer NSError*)fontError : @"not in the app");
-    }
-    // the battery number's font (CPU_RENDER_BATTERY_FONT), the same way; when it does not load, the number is not drawn
-    NSURL* batteryFontURL = [[NSBundle mainBundle] URLForResource:@"Micro5-Regular" withExtension:@"ttf"];
-    CFErrorRef batteryFontError = NULL;
-    if ((batteryFontURL == nil) || !CTFontManagerRegisterFontsForURL((__bridge CFURLRef)batteryFontURL, kCTFontManagerScopeProcess, &batteryFontError))
-    {
-      NSLog(@"the battery number's font did not load (%@); the battery bar is drawn without its number", (batteryFontError != NULL) ? (__bridge_transfer NSError*)batteryFontError : @"not in the app");
     }
 
     CpuRenderInit();
@@ -5501,33 +5442,6 @@ static NSTimeInterval TopDelay(void)
   // on: read at once, so the slots are there at the next render; off: the values are dropped
   [self readBatteryWifi:true];
   [self updateRendererParameters];
-  [self updateUI];
-}
-
-// Battery style: the style of the segment chosen. The help window's examples draw it too: one built before is dropped,
-// and built again now if it is open, else at its next opening
-- (IBAction)batteryStyleChoiceChanged:(id)sender
-{
-  NSInteger index = batteryStyleChoice.selectedSegment;
-  if ((index < 0) || (index >= (NSInteger)BATTERY_STYLE_CHOICES))
-  {
-    return;
-  }
-  batteryStyle = batteryStyles[index];
-  [[NSUserDefaults standardUserDefaults] setObject:batteryStyleNames[index] forKey:BatteryStyleKey];
-  if (helpWindow != nil)
-  {
-    const bool open = helpWindow.visible;
-    const NSPoint topLeft = NSMakePoint(NSMinX(helpWindow.frame), NSMaxY(helpWindow.frame));
-    [helpWindow orderOut:nil];
-    helpWindow = nil;
-    if (open)
-    {
-      helpWindow = MakeHelpWindow();
-      [helpWindow setFrameTopLeftPoint:topLeft];
-      [helpWindow orderFront:nil];
-    }
-  }
   [self updateUI];
 }
 

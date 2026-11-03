@@ -24,7 +24,6 @@
 
 #include <math.h>
 #include <stdint.h>
-#include <CoreText/CoreText.h>
 
 // red, green and blue, each 0..1
 typedef struct
@@ -661,45 +660,9 @@ static CGFloat _snap(CGFloat v, CGFloat scale)
   return round(v*scale)/scale;
 }
 
-// the battery number's font, CPU_RENDER_BATTERY_FONT at CPU_RENDER_BATTERY_FONT_SIZE, kept from the first call that finds it
-// registered (the tests never call CpuRenderInit, and register it themselves); NULL until then. CTFontCreateWithName gives
-// a stand-in for a name it does not know, so the PostScript name is compared
-static CTFontRef _battery_font(void)
-{
-  static CTFontRef font = NULL;
-  if (font == NULL)
-  {
-    CTFontRef made = CTFontCreateWithName(CFSTR(CPU_RENDER_BATTERY_FONT), CPU_RENDER_BATTERY_FONT_SIZE, NULL);
-    if (made == NULL)
-    {
-      return NULL;
-    }
-    CFStringRef name = CTFontCopyPostScriptName(made);
-    const bool found = (name != NULL) && (CFStringCompare(name, CFSTR(CPU_RENDER_BATTERY_FONT), 0) == kCFCompareEqualTo);
-    if (name != NULL)
-    {
-      CFRelease(name);
-    }
-    if (!found)
-    {
-      CFRelease(made);
-      return NULL;
-    }
-    font = made;
-  }
-  return font;
-}
-
-// c mixed t (0..1) of the way toward to
-static rgb _mix(rgb c, rgb to, double t)
-{
-  rgb m = {c.r + ((to.r - c.r)*t), c.g + ((to.g - c.g)*t), c.b + ((to.b - c.b)*t)};
-  return m;
-}
-
-// the full battery's mark, a lightning bolt, as a path over the bar at x, width wide: 4.25 pt wide and 5.7 tall (its corners
+// the battery's mark, a lightning bolt, as a path over the bar at x, width wide: 4.25 pt wide and 5.7 tall (its corners
 // traced from an 11 x 14-pixel icon at 2x), a little smaller on a bar narrower than that, centred across the bar and 1 pt
-// above the image's centre as the digits' stack is, its box's corner on a device pixel and then, at its own size, 0.125 pt
+// above the image's centre, its box's corner on a device pixel and then, at its own size, 0.125 pt
 // right and 0.15 pt up, where the icon has it (on a whole pixel, the band's edges would blend at 2x where the icon's are
 // sharp), so on the 6- and 8-pt bars it stands 0.25 pt right of centre: the icon's 11 pixels cannot be centred on whole
 // ones. Scaled down it keeps the device pixel, inside the bar. Its slanted edges blend, as the icon's do. The caller
@@ -723,155 +686,54 @@ static CGMutablePathRef _battery_bolt(CGFloat x, CGFloat width, CGFloat scale)
   return bolt;
 }
 
-// the battery's cap: the top 1 pt of its bar at x, width wide, cleared but for the middle half, each cut a quarter of the
-// width on a device pixel (2 pt of the 8-pt bar, 1 of the 4-pt; 1.5 of the 6-pt, 2 at 1x), so the bar stands as a battery
+// the battery's cap: the top CPU_RENDER_BATTERY_CAP pt of its bar at x, width wide, cleared but for the middle half, each
+// cut a quarter of the width on a device pixel (2 pt of the 8-pt bar, 1 of the 4-pt; 1.5 of the 6-pt, 2 at 1x), so the
+// bar stands as a battery
 static void _render_battery_cap(CGContextRef ctx, CGFloat x, CGFloat width)
 {
   const CGFloat cut = _snap(width/4.0, _device_scale(ctx));
-  CGContextClearRect(ctx, CGRectMake(x, 15.0, cut, 1.0));
-  CGContextClearRect(ctx, CGRectMake(x + width - cut, 15.0, cut, 1.0));
+  CGContextClearRect(ctx, CGRectMake(x, 16.0 - CPU_RENDER_BATTERY_CAP, cut, CPU_RENDER_BATTERY_CAP));
+  CGContextClearRect(ctx, CGRectMake(x + width - cut, 16.0 - CPU_RENDER_BATTERY_CAP, cut, CPU_RENDER_BATTERY_CAP));
 }
 
-// the battery's bar at x, width wide, in style (CPU_RENDER_BATTERY_*; an unknown one as CPU_RENDER_BATTERY_LIGHT_TINT): its
-// background above the fill only, from the fill's top, then the fill in fill (at 0.9 opacity alone when neutral, on
-// the adapter and not charging), the charge's share of the height, its top on a device pixel, and over them the number: the charge in whole
-// percent, 0 to 99, its digits upright and stacked from the top, 5 pt tall, 1 pt apart, each centred across the bar on
-// whole points and the stack 1 pt above the image's centre, on device pixels, so the digits' edges are sharp. Each
-// style's colours are CPU_RENDER_BATTERY_*'s in CpuRenderer.h; a digit cut out lets the menu bar show through it. No
-// number without the font. A full bar (100), the fill over all of it in every style, has a lightning bolt in place of the
-// number (_battery_bolt; stacked, "100" would be 17 pt, taller than the dashed style's 14-pt bar), drawn solid at full
-// opacity in every power state: black on a light fill, white on a dark one, by the fill's lightness (0.2126 r + 0.7152 g
-// + 0.0722 b) above or below 0.5: black on the charging green (0.63 on a light menu bar, 0.65 on a dark one) and on the
-// adapter's white, white on the battery's red (0.39, 0.42) and on the adapter's black. The bolt needs no font
-static void _render_battery_bar(CGContextRef ctx, CGFloat x, CGFloat width, double charge, rgb fill, bool neutral, int style, CGFloat color, bool light, CGFloat bottom)
+// the battery's bar at x, width wide: a fill of the charge's share of the height, its top on a device pixel, in the menu
+// bar's text colour (white on a dark menu bar, black on a light one), and above it, up to the top, while charging the
+// text colour at 0.9 opacity, else the bars' background. The fill is at 0.9 opacity, but while charging at
+// CPU_RENDER_BATTERY_CHARGING_LEVEL, a shade less, so that the charge shows on a bar white to its top. Both alone, with no
+// background under them (at 0.9 as bright as the system's icons on a dark menu bar; the charging fill dimmer on purpose). Over them a lightning bolt (_battery_bolt),
+// solid in bolt, at any charge
+static void _render_battery_bar(CGContextRef ctx, CGFloat x, CGFloat width, double charge, bool charging, rgb bolt, CGFloat color, bool light, CGFloat bottom)
 {
   const double share = fmin(fmax(charge, 0.0), 1.0);
   const CGFloat scale = _device_scale(ctx);
-  const rgb white = {1.0, 1.0, 1.0};
-  const rgb black = {0.0, 0.0, 0.0};
-  switch (style)
-  {
-    case CPU_RENDER_BATTERY_GREY:
-      CGContextSetGrayFillColor(ctx, color, 0.60);
-      break;
-    case CPU_RENDER_BATTERY_LIGHT_GREY:
-      CGContextSetGrayFillColor(ctx, color, 0.75);
-      break;
-    case CPU_RENDER_BATTERY_TINT:
-      CGContextSetRGBFillColor(ctx, fill.r, fill.g, fill.b, neutral ? 0.3 : 0.38);
-      break;
-    default:
-      style = CPU_RENDER_BATTERY_LIGHT_TINT;
-      if (neutral)
-      {
-        CGContextSetGrayFillColor(ctx, color, 0.55);
-      }
-      else
-      {
-        const rgb tint = _mix(fill, white, 0.55);
-        CGContextSetRGBFillColor(ctx, tint.r, tint.g, tint.b, 1.0);
-      }
-      break;
-  }
+  const CGFloat text = light ? 0.0 : 1.0;
   const CGRect filled = CGRectMake(x, bottom, width, _snap(share*(16.0-bottom), scale));
-  // the background only above the fill: over it, the neutral fill at 0.9 was brighter than the text colour at 0.9 alone,
-  // which gives the system's icons' 233 over the dark menu bar's 32 (as the Neural Engine's bar and Wi-Fi's do)
-  CGContextFillRect(ctx, CGRectMake(x, CGRectGetMaxY(filled), width, 16.0 - CGRectGetMaxY(filled)));
-  CGContextSetRGBFillColor(ctx, fill.r, fill.g, fill.b, neutral ? 0.9 : 1.0);
-  CGContextFillRect(ctx, filled);
-  const long percent = lround(share*100.0);
-  if (percent >= 100)
+  const CGRect above = CGRectMake(x, CGRectGetMaxY(filled), width, 16.0 - CGRectGetMaxY(filled));
+  if (charging)
   {
-    CGMutablePathRef bolt = _battery_bolt(x, width, scale);
-    const double lightness = (0.2126*fill.r) + (0.7152*fill.g) + (0.0722*fill.b);
-    CGContextSetGrayFillColor(ctx, (lightness > 0.5) ? 0.0 : 1.0, 1.0);
-    CGContextAddPath(ctx, bolt);
-    CGContextFillPath(ctx);
-    CGPathRelease(bolt);
-    return;
-  }
-  CTFontRef font = _battery_font();
-  if (font == NULL)
-  {
-    return;
-  }
-  char text[8];
-  const int count = snprintf(text, sizeof(text), "%ld", percent);
-  if ((count <= 0) || ((size_t)count >= sizeof(text)))
-  {
-    return;
-  }
-  const CGFloat digit = 5.0;
-  const CGFloat step = digit + 1.0; // a digit and the gap after it
-  const CGFloat lowest = _snap((16.0 - ((count*digit) + ((count-1)*(step - digit))))/2.0, scale) + 1.0; // the last digit's bottom
-  CGMutablePathRef digits = CGPathCreateMutable();
-  for (int i=0; i<count; i++)
-  {
-    UniChar character = (UniChar)text[i];
-    CGGlyph glyph = 0;
-    if (!CTFontGetGlyphsForCharacters(font, &character, &glyph, 1))
-    {
-      continue;
-    }
-    CGPathRef path = CTFontCreatePathForGlyph(font, glyph, NULL);
-    if (path == NULL)
-    {
-      continue;
-    }
-    const CGRect box = CGPathGetPathBoundingBox(path);
-    const CGAffineTransform place = CGAffineTransformMakeTranslation(x + floor((width - box.size.width)/2.0) - box.origin.x,
-                                                                     lowest + ((count-1-i)*step) - box.origin.y);
-    CGPathAddPath(digits, &place, path);
-    CGPathRelease(path);
-  }
-  CGContextSaveGState(ctx);
-  if ((style == CPU_RENDER_BATTERY_LIGHT_TINT) && light && !neutral)
-  {
-    // black on the light tint and on the fill: cut out, they would be as light as the tint
-    CGContextSetGrayFillColor(ctx, 0.0, 0.9);
+    CGContextSetGrayFillColor(ctx, text, 0.9);
   }
   else
   {
-    // cut out: everywhere, or in the tint style off the adapter only where they cross the fill (on the adapter everywhere,
-    // so that the text colour drawn above the fill below stands at 0.9 alone, not over the background)
-    if ((style == CPU_RENDER_BATTERY_TINT) && !neutral)
-    {
-      CGContextClipToRect(ctx, filled);
-    }
-    CGContextSetBlendMode(ctx, kCGBlendModeClear);
+    CGContextSetGrayFillColor(ctx, color, light ? 0.12 : 0.3); // _render_background's
   }
-  CGContextAddPath(ctx, digits);
+  CGContextFillRect(ctx, above);
+  CGContextSetGrayFillColor(ctx, text, charging ? CPU_RENDER_BATTERY_CHARGING_LEVEL : 0.9);
+  CGContextFillRect(ctx, filled);
+  CGMutablePathRef path = _battery_bolt(x, width, scale);
+  CGContextSetRGBFillColor(ctx, bolt.r, bolt.g, bolt.b, 1.0);
+  CGContextAddPath(ctx, path);
   CGContextFillPath(ctx);
-  CGContextRestoreGState(ctx);
-  if (style == CPU_RENDER_BATTERY_TINT)
-  {
-    // above the fill, the fill's colour lighter (darker on a light menu bar), or on the adapter the text colour
-    CGContextSaveGState(ctx);
-    CGContextAddRect(ctx, CGRectMake(x, 0.0, width, 16.0));
-    CGContextAddRect(ctx, filled);
-    CGContextEOClip(ctx);
-    if (neutral)
-    {
-      CGContextSetGrayFillColor(ctx, light ? 0.0 : 1.0, 0.9);
-    }
-    else
-    {
-      const rgb above = light ? _mix(fill, black, 0.45) : _mix(fill, white, 0.6);
-      CGContextSetRGBFillColor(ctx, above.r, above.g, above.b, 1.0);
-    }
-    CGContextAddPath(ctx, digits);
-    CGContextFillPath(ctx);
-    CGContextRestoreGState(ctx);
-  }
-  CGPathRelease(digits);
+  CGPathRelease(path);
 }
 
 // the battery's reading in its slot at x: not read (charge below 0), the bars' background alone in bar style, nothing in Dot
-// style. Else a wide bar, whole, without the dashes, in style (_render_battery_bar), its fill the charge, coloured by the
-// power state: charging, systemGreen; on the adapter and not charging (onAC), the text colour at 0.9 opacity; on battery,
-// systemRed. Every bar, read or not, has the cap (_render_battery_cap). In Dot style the readings' dot, in the same colour,
-// filled while the charge is 0.005 or more, with no number and no cap
-static void _render_battery(CGContextRef ctx, CGFloat x, double charge, bool charging, bool onAC, int style, CGFloat color, bool bar, CGFloat tickWidth, bool light, CGFloat bottom)
+// style. Else a wide bar, whole, without the dashes (_render_battery_bar), its fill the charge, and its bolt coloured by
+// the power state: charging, systemGreen; on battery, systemRed; on the adapter and not charging (onAC), black on a dark
+// menu bar and white on a light one, set off from the fill. Every bar, read or not, has the cap (_render_battery_cap). In
+// Dot style the readings' dot, filled while the charge is 0.005 or more, with no cap: systemGreen while charging, on the
+// adapter the text colour, on battery systemRed
+static void _render_battery(CGContextRef ctx, CGFloat x, double charge, bool charging, bool onAC, CGFloat color, bool bar, CGFloat tickWidth, bool light, CGFloat bottom)
 {
   const CGFloat width = 2.0*tickWidth;
   if (!(charge >= 0.0))
@@ -883,16 +745,16 @@ static void _render_battery(CGContextRef ctx, CGFloat x, double charge, bool cha
     }
     return;
   }
-  const bool neutral = !charging && onAC;
-  const rgb fill = charging ? _charging_color(light) : (onAC ? _text_color(light) : _discharging_color(light));
+  const rgb state = charging ? _charging_color(light) : (onAC ? _text_color(light) : _discharging_color(light));
   if (bar)
   {
-    _render_battery_bar(ctx, x, width, charge, fill, neutral, style, color, light, bottom);
+    const rgb bolt = (charging || !onAC) ? state : _text_color(!light);
+    _render_battery_bar(ctx, x, width, charge, charging, bolt, color, light, bottom);
     _render_battery_cap(ctx, x, width);
   }
   else
   {
-    _render_dot(ctx, x, charge >= 0.005, false, fill, color, tickWidth, light);
+    _render_dot(ctx, x, charge >= 0.005, false, state, color, tickWidth, light);
   }
 }
 
@@ -1217,7 +1079,7 @@ void CpuRender(CpuSummaryInfo* cpu_info, CGContextRef ctx, bool light, int granu
   if ((shown & CPU_RENDER_SHOWN_BATTERY) != 0)
   {
     _render_battery(ctx, CpuRenderReadingX(bar, tickWidth, tickTotalWidth, shown, imageWidth, split, cores, extraCount, extra, CpuRenderReadingIndex(shown, CPU_RENDER_KIND_BATTERY)),
-                    readings->battery, readings->batteryCharging, readings->batteryOnAC, readings->batteryStyle, color, bar, tickWidth, light, bottom);
+                    readings->battery, readings->batteryCharging, readings->batteryOnAC, color, bar, tickWidth, light, bottom);
   }
   if ((shown & CPU_RENDER_SHOWN_WIFI) != 0)
   {
