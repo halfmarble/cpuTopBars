@@ -38,25 +38,25 @@ Rest the pointer on a bar for a second and its reading shows below the menu bar.
 
 * **Battery:** the battery's charge, and whether it is charging, not charging, charged, or on battery, with the time left when macOS gives one.
 
-<img src="screenshots/hover-battery.png" width="248" alt="Battery label">
+<img src="screenshots/hover-battery.png" width="250" alt="Battery label">
 
 * **Wi-Fi:** while connected, the signal, then the IP address, router, MAC address, security, channel, noise, transmit rate and PHY mode; else whether Wi-Fi is off or not connected. In the picture the addresses are blacked out.
 
 <img src="screenshots/hover-wifi.png" width="274" alt="Wi-Fi label, addresses blacked out">
 
-* **Disk:** the startup volume's use, with its free and used space.
+* **Disk:** the startup volume's use, with its free and used space and its total size.
 
-<img src="screenshots/hover-disk.png" width="370" alt="Disk usage label">
+<img src="screenshots/hover-disk.png" width="222" alt="Disk usage label">
 
-* **Memory:** memory in use, with free, used and swapped memory.
+* **Memory:** memory in use, with free, used and swapped memory and the total.
 
-<img src="screenshots/hover-memory.png" width="502" alt="Memory usage label">
+<img src="screenshots/hover-memory.png" width="220" alt="Memory usage label">
 
 * **CPU:** overall CPU use, with the efficiency and performance cores' use.
 
-<img src="screenshots/hover-cpu.png" width="436" alt="CPU label">
+<img src="screenshots/hover-cpu.png" width="208" alt="CPU label">
 
-* **GPU:** the GPU's use.
+* **GPU:** the GPU's use, and in the version built from this repository its power in watts, where it can be read.
 
 <img src="screenshots/hover-gpu.png" width="175" alt="GPU label">
 
@@ -66,7 +66,7 @@ Rest the pointer on a bar for a second and its reading shows below the menu bar.
 
 * **Efficiency cores:** their use, then each efficiency core's load; › marks the core under the pointer.
 
-<img src="screenshots/hover-e-cores.png" width="204" alt="Efficiency cores label">
+<img src="screenshots/hover-e-cores.png" width="207" alt="Efficiency cores label">
 
 * **Performance cores:** the same for the performance cores.
 
