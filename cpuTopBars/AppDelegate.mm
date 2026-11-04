@@ -2565,9 +2565,22 @@ static NSString* OthersRowText(int count)
     [topMenus[i] setHidden:NO];
   }
 
-  [othersItem setAttributedTitle:[self othersTitle:topOthersCount]];
-  [othersItem setHidden:(topOthersCount <= 0)];
-  
+  int others = topOthersCount;
+#if !CPUTOPBARS_SANDBOXED
+  // in CPU order, the first block of top the app takes (about 2.35 s after the menu opens) ranks other users' processes
+  // and hides the row: until it comes they are about to be readable, so the row is not shown. A top that never
+  // launched leaves the row; after one that exits before that block, or prints a block with no readable rows before it
+  // (seen a sample later), the row shows again at the next process sample. A top that runs and gives no block keeps it
+  // hidden for the opening
+  if ((topOrder == TopOrderCpu) && (topFigures == nil) && (topToolSession != nil) && [topToolSession->task isRunning] &&
+      !topToolSession->loggedEmpty)
+  {
+    others = 0;
+  }
+#endif
+  [othersItem setAttributedTitle:[self othersTitle:others]];
+  [othersItem setHidden:(others <= 0)];
+
   [menu update];
 }
 
