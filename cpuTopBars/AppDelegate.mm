@@ -386,7 +386,7 @@ static NSString* MemoryText(uint64_t bytes)
 
 // a hover label's lines, one value to a line: each row is @[name, value], the name padded with spaces to the longest
 // name's length and three, so that the values start in one column in the label's monospace font, as Wi-Fi's label
-// does (WifiTipText); the lines joined by "\n"; a label of one line, its name and one space ("CPU: 21%", as before).
+// does (WifiTexts); the lines joined by "\n"; a label of one line, its name and one space ("CPU: 21%", as before).
 // Defined here, before the labels that use it; Wi-Fi's keeps its own.
 static NSString* TipLines(NSArray<NSArray<NSString*>*>* rows)
 {
@@ -426,6 +426,70 @@ static void DiskTexts(uint64_t wholeBytes, uint64_t freeBytes, NSLocale* locale,
     *tipText = TipLines(@[@[@"Disk usage:", *text], @[@"Free:", freeText], @[@"Used:", usedText], @[@"Total:", GBText(wholeBytes, locale)]]);
     *text = [NSString stringWithFormat:@"%@ (free %@, used %@)", *text, freeText, usedText];
   }
+}
+
+// memory's panel row and hover label, from one reading: read, whether it was read; usedBytes and totalBytes; swapRead,
+// whether swap was read, and swapBytes, the swap in use. The row: its title led by the total ("16GB Memory usage:") and
+// "57% (free 6.9 GB, used 9.1 GB, swapped 0.5 GB)", the swap only while it is read; "Memory usage:" and "—" when it was
+// not read. The label, one value to a line (TipLines): "Memory usage:" and its percentage, "Free:", "Used:", "Swapped:"
+// (only while swap is read) and "Total:", every value starting in one column; "Memory usage: —" when it was not read or
+// the total is 0
+static void MemoryTexts(bool read, uint64_t usedBytes, uint64_t totalBytes, bool swapRead, uint64_t swapBytes, NSLocale* locale, NSArray<NSString*>* __strong * row, NSString* __strong * tipText)
+{
+  if (!read)
+  {
+    *row = @[@"Memory usage:", @"—"];
+    *tipText = @"Memory usage: —";
+    return;
+  }
+  NSString* title = TotalTitle(GiBText(totalBytes, locale), @"Memory usage:");
+  NSString* percent = PercentText(usedBytes, totalBytes, locale);
+  if (totalBytes == 0)
+  {
+    *row = @[title, percent];
+    *tipText = @"Memory usage: —";
+    return;
+  }
+  uint64_t used = MIN(usedBytes, totalBytes);
+  NSString* freeText = GiBText(totalBytes - used, locale);
+  NSString* usedText = GiBText(used, locale);
+  NSString* swapText = swapRead ? GiBText(swapBytes, locale) : nil;
+  NSString* swapped = (swapText != nil) ? [@", swapped " stringByAppendingString:swapText] : @"";
+  *row = @[title, [NSString stringWithFormat:@"%@ (free %@, used %@%@)", percent, freeText, usedText, swapped]];
+  NSMutableArray<NSArray<NSString*>*>* rows = [NSMutableArray arrayWithObjects:@[@"Memory usage:", percent], @[@"Free:", freeText],
+                                               @[@"Used:", usedText], nil];
+  if (swapText != nil)
+  {
+    [rows addObject:@[@"Swapped:", swapText]];
+  }
+  [rows addObject:@[@"Total:", GiBText(totalBytes, locale)]];
+  *tipText = TipLines(rows);
+}
+
+// the CPU's panel row and hover label, from one reading: cpu, its share busy, and the E-cores' and the P-cores',
+// efficiency and performance (each 0..1; below 0, not read). The row: "CPU:" and "21%", with each kind's share beside it
+// when both were read, "21% (Efficiency cores: 30%, Performance cores: 12%)"; "—" when not read. The label, one value to a
+// line (TipLines): "CPU:", and when both kinds were read "Efficiency cores:" and "Performance cores:"; "CPU: —" when not
+// read
+static void CpuTexts(double cpu, double efficiency, double performance, NSLocale* locale, NSArray<NSString*>* __strong * row, NSString* __strong * tipText)
+{
+  if (cpu < 0.0)
+  {
+    *row = @[@"CPU:", @"—"];
+    *tipText = @"CPU: —";
+    return;
+  }
+  NSString* share = ShareText(cpu, locale);
+  if ((efficiency < 0.0) || (performance < 0.0))
+  {
+    *row = @[@"CPU:", share];
+    *tipText = TipLines(@[@[@"CPU:", share]]);
+    return;
+  }
+  NSString* efficiencyText = ShareText(efficiency, locale);
+  NSString* performanceText = ShareText(performance, locale);
+  *row = @[@"CPU:", [NSString stringWithFormat:@"%@ (Efficiency cores: %@, Performance cores: %@)", share, efficiencyText, performanceText]];
+  *tipText = TipLines(@[@[@"CPU:", share], @[@"Efficiency cores:", efficiencyText], @[@"Performance cores:", performanceText]]);
 }
 
 // "3d 4h 27m"; under a day "4h 27m", under an hour "27m"
@@ -3291,80 +3355,78 @@ static void HelpCoreReadings(const double* coreLoads, int coreLoadCount, CpuRead
   readings->performance = (kindCount[1] > 0) ? (kindSum[1] / kindCount[1]) : -1.0;
 }
 
-// the GPU's hover label, "GPU: 12%", and with its power read (watts 0 or more: IOReport, the unsandboxed variant) one
-// value to a line (TipLines), "GPU:     12%" over "Power:   0.08 W"; the Neural Engine's, "Neural Engine: ON", or with
-// its share of time busy read (busy 0..1), "Neural Engine: 37%"; unpadded, as barTipTextAt: pads them
-static NSString* GpuTipText(double gpu, double watts)
+// the GPU's panel row and hover label, from one reading: gpu, its share of time busy (0..1, more clamped to 1; below 0,
+// not read), and watts, its power (0 or more: IOReport, the unsandboxed variant; below 0, not read). The row: "GPU:" and
+// "12%", with the power beside it, "12%  0.08 W"; "—" when not read. The label: "GPU: 12%", with the power one value to a
+// line (TipLines), "GPU:     12%" over "Power:   0.08 W"; "GPU: cannot be read on this Mac" when not read; unpadded, as
+// barTipTextAt: pads it
+static void GpuTexts(double gpu, double watts, NSLocale* locale, NSArray<NSString*>* __strong * row, NSString* __strong * tipText)
 {
   if (gpu < 0.0)
   {
-    return @"GPU: cannot be read on this Mac";
+    *row = @[@"GPU:", @"—"];
+    *tipText = @"GPU: cannot be read on this Mac";
+    return;
   }
-  NSLocale* locale = [NSLocale currentLocale];
-  NSMutableArray<NSArray<NSString*>*>* rows = [NSMutableArray arrayWithObject:
-    @[@"GPU:", ShareText(fmin(gpu, 1.0), locale)]];
-  if (watts >= 0.0)
+  NSString* share = ShareText(fmin(gpu, 1.0), locale);
+  if (watts < 0.0)
   {
-    [rows addObject:@[@"Power:", [[NSString alloc] initWithFormat:@"%.2f W" locale:locale, watts]]];
+    *row = @[@"GPU:", share];
+    *tipText = TipLines(@[@[@"GPU:", share]]);
+    return;
   }
-  return TipLines(rows);
+  NSString* power = [[NSString alloc] initWithFormat:@"%.2f W" locale:locale, watts];
+  *row = @[@"GPU:", [NSString stringWithFormat:@"%@  %@", share, power]];
+  *tipText = TipLines(@[@[@"GPU:", share], @[@"Power:", power]]);
 }
 
-static NSString* NeuralEngineTipText(int state, double busy)
+// the Neural Engine's panel row and hover label, from one reading: busy, its share of time busy (0..1, more clamped to 1:
+// IOReport, the unsandboxed variant; below 0, not read), else state, its power (above 0 on, 0 off; below 0, not read).
+// The row: "Neural Engine:" and "37%", "ON" or "OFF", "—" when neither was read; the label: "Neural Engine: " and the
+// same value, "Neural Engine: cannot be read on this Mac" when neither was read; unpadded, as barTipTextAt: pads it
+static void NeuralEngineTexts(int state, double busy, NSLocale* locale, NSArray<NSString*>* __strong * row, NSString* __strong * tipText)
 {
+  NSString* value = nil;
   if (busy >= 0.0)
   {
-    return [@"Neural Engine: " stringByAppendingString:ShareText(fmin(busy, 1.0), [NSLocale currentLocale])];
+    value = ShareText(fmin(busy, 1.0), locale);
   }
-  if (state < 0)
+  else if (state >= 0)
   {
-    return @"Neural Engine: cannot be read on this Mac";
+    value = (state > 0) ? @"ON" : @"OFF";
   }
-  return (state > 0) ? @"Neural Engine: ON" : @"Neural Engine: OFF";
+  *row = @[@"Neural Engine:", value ?: @"—"];
+  *tipText = [@"Neural Engine: " stringByAppendingString:value ?: @"cannot be read on this Mac"];
 }
 
-// the battery's value, as its panel row and its hover label show it: its charge and its state, "87% (charging)"
-// (SystemInfoBatteryStateText); "—" when it was not read
-static NSString* BatteryValueText(bool read, const SystemInfoBattery* battery)
+// the battery's panel row and hover label, from one reading: its charge, clamped to 0..1, and its state in
+// SystemInfoBatteryStateText's words. The row: "Battery:" and "87% (charging)", or on battery with its time to empty
+// read "87% (on battery, 3:12 left)"; "—" when it was not read. The label, one value to a line (TipLines): "Battery:" and
+// the charge, "State:" ("charged", "charging", "not charging" or "on battery": the row's words, without the time left)
+// and, on battery with its time to empty read, "Time left:" ("3:12"); "Battery: —" when it was not read; unpadded, as
+// barTipTextAt: pads it
+static void BatteryTexts(bool read, const SystemInfoBattery* battery, NSLocale* locale, NSArray<NSString*>* __strong * row, NSString* __strong * tipText)
 {
   if (!read)
   {
-    return @"—";
+    *row = @[@"Battery:", @"—"];
+    *tipText = @"Battery: —";
+    return;
   }
+  NSString* charge = ShareText(fmin(fmax(battery->level, 0.0), 1.0), locale);
   char state[64];
   SystemInfoBatteryStateText(battery, state, sizeof(state));
-  return [NSString stringWithFormat:@"%@ (%@)", ShareText(fmin(fmax(battery->level, 0.0), 1.0), [NSLocale currentLocale]), @(state)];
-}
-
-// the battery's hover label, one value to a line (TipLines): "Battery:" and the charge, "State:" ("charged", "charging",
-// "not charging" or "on battery", tested in the order SystemInfoBatteryStateText tests them) and, on battery with its time
-// to empty read, "Time left:" ("3:12"); "Battery: —" when it was not read; unpadded, as barTipTextAt: pads it
-static NSString* BatteryTipText(bool read, const SystemInfoBattery* battery)
-{
-  if (!read)
-  {
-    return @"Battery: —";
-  }
-  NSString* charge = ShareText(fmin(fmax(battery->level, 0.0), 1.0), [NSLocale currentLocale]);
-  NSString* state = @"on battery";
-  if (battery->charged)
-  {
-    state = @"charged";
-  }
-  else if (battery->charging)
-  {
-    state = @"charging";
-  }
-  else if (battery->onAC)
-  {
-    state = @"not charging";
-  }
-  NSMutableArray<NSArray<NSString*>*>* rows = [NSMutableArray arrayWithObjects:@[@"Battery:", charge], @[@"State:", state], nil];
+  *row = @[@"Battery:", [NSString stringWithFormat:@"%@ (%@)", charge, @(state)]];
+  // the label's state: the same words without the time left, which gets a line of its own
+  SystemInfoBattery stateOnly = *battery;
+  stateOnly.minutesToEmpty = -1;
+  SystemInfoBatteryStateText(&stateOnly, state, sizeof(state));
+  NSMutableArray<NSArray<NSString*>*>* rows = [NSMutableArray arrayWithObjects:@[@"Battery:", charge], @[@"State:", @(state)], nil];
   if (!battery->charged && !battery->charging && !battery->onAC && (battery->minutesToEmpty > 0))
   {
     [rows addObject:@[@"Time left:", [NSString stringWithFormat:@"%d:%02d", battery->minutesToEmpty / 60, battery->minutesToEmpty % 60]]];
   }
-  return TipLines(rows);
+  *tipText = TipLines(rows);
 }
 
 // Wi-Fi's state in words, its panel row's value: "connected", "on, not connected" or "off"; "—" with no interface read
@@ -3389,26 +3451,32 @@ static NSString* WifiChannelText(const SystemInfoWifi* wifi)
   return @(text);
 }
 
-// Wi-Fi's hover label: connected, "Wi-Fi:" and the signal (-50 dBm), then a line each for the details the macOS Wi-Fi
-// menu lists with Option held, in its order, but those that need Location Services (the network's name, its BSSID, the
-// country code), the MCS index and NSS, which CoreWLAN does not give, and the RSSI, which is the first line: "IP
-// Address:", "Router:", "MAC Address:", "Security:", "Channel:", "Noise:", "Tx Rate:" and "PHY Mode:"; a detail that was
-// not read (ip, router and mac empty), or that has no name, has no line. Each name, "Wi-Fi:" included, is padded with
-// spaces to 15 characters ("MAC Address:", the longest, and three), so the values start in one column in the label's
-// monospace font ("Wi-Fi:         -50 dBm"). Else "Wi-Fi: off" or "Wi-Fi: not connected"
-static NSString* WifiTipText(const SystemInfoWifi* wifi, const char* ip, const char* router, const char* mac)
+// Wi-Fi's panel row and hover label, from one reading. The row: "Wi-Fi:" and the signal while connected ("-55 dBm"),
+// else its state (WifiStateText); the details are in the label. The label: connected, "Wi-Fi:" and the signal (-50 dBm),
+// then a line each for the details the macOS Wi-Fi menu lists with Option held, in its order, but those that need
+// Location Services (the network's name, its BSSID, the country code), the MCS index and NSS, which CoreWLAN does not
+// give, and the RSSI, which is the first line: "IP Address:", "Router:", "MAC Address:", "Security:", "Channel:",
+// "Noise:", "Tx Rate:" and "PHY Mode:"; a detail that was not read (ip, router and mac empty), or that has no name, has no
+// line. Each name, "Wi-Fi:" included, is padded with spaces to 15 characters ("MAC Address:", the longest, and three), so
+// the values start in one column in the label's monospace font ("Wi-Fi:         -50 dBm"). Else "Wi-Fi: off" or "Wi-Fi:
+// not connected"
+static void WifiTexts(const SystemInfoWifi* wifi, const char* ip, const char* router, const char* mac, NSArray<NSString*>* __strong * row, NSString* __strong * tipText)
 {
+  *row = @[@"Wi-Fi:", wifi->connected ? [NSString stringWithFormat:@"%d dBm", wifi->rssi] : WifiStateText(wifi)];
   if (!wifi->present)
   {
-    return @"Wi-Fi: cannot be read on this Mac";
+    *tipText = @"Wi-Fi: cannot be read on this Mac";
+    return;
   }
   if (!wifi->powerOn)
   {
-    return @"Wi-Fi: off";
+    *tipText = @"Wi-Fi: off";
+    return;
   }
   if (!wifi->connected)
   {
-    return @"Wi-Fi: not connected";
+    *tipText = @"Wi-Fi: not connected";
+    return;
   }
   NSMutableString* text = [NSMutableString stringWithFormat:@"%-15s%d dBm", "Wi-Fi:", wifi->rssi];
   if (ip[0] != 0)
@@ -3435,18 +3503,48 @@ static NSString* WifiTipText(const SystemInfoWifi* wifi, const char* ip, const c
   {
     [text appendFormat:@"\n%-15s%s", "PHY Mode:", phy];
   }
-  return text;
+  *tipText = text;
 }
 
-// Wi-Fi's panel row: "Wi-Fi:" and the signal while connected ("-55 dBm"), else its state; the details are in its hover
-// label (WifiTipText)
-static NSArray<NSArray<NSString*>*>* WifiRows(const SystemInfoWifi* wifi)
+// the panel row and the hover label of the reading of kind (CPU_RENDER_KIND_*), from its last reading (updateCPU:,
+// readBatteryWifi:, readWifi:), both from that reading's one function: the battery's, Wi-Fi's, memory's, the Neural
+// Engine's, the GPU's or the CPU's; false, with row and tipText left as they were, for any other kind (disk's are
+// readDisk's, from DiskTexts; the E-cores' and the P-cores' have a label, CoreKindReadingText, and no row of their own)
+static bool ReadingTexts(int kind, NSArray<NSString*>* __strong * row, NSString* __strong * tipText)
 {
-  if (wifi->connected)
+  NSLocale* locale = [NSLocale currentLocale];
+  switch (kind)
   {
-    return @[@[@"Wi-Fi:", [NSString stringWithFormat:@"%d dBm", wifi->rssi]]];
+    case CPU_RENDER_KIND_BATTERY:
+      BatteryTexts(readingsBattery, &readingsBatteryState, locale, row, tipText);
+      return true;
+    case CPU_RENDER_KIND_WIFI:
+      WifiTexts(&readingsWifi, readingsWifiIp, readingsWifiRouter, readingsWifiMac, row, tipText);
+      return true;
+    case CPU_RENDER_KIND_MEMORY:
+      MemoryTexts(readingsMemory, readingsMemoryUsed, readingsMemoryTotal, readingsSwap, readingsSwapUsed, locale, row, tipText);
+      return true;
+    case CPU_RENDER_KIND_NEURAL_ENGINE:
+      NeuralEngineTexts(readingsNeuralEngine, readingsNeuralEngineBusy, locale, row, tipText);
+      return true;
+    case CPU_RENDER_KIND_GPU:
+      GpuTexts(readingsGpu, readingsGpuWatts, locale, row, tipText);
+      return true;
+    case CPU_RENDER_KIND_CPU:
+      CpuTexts(readingsCpu, readingsCpuEfficiency, readingsCpuPerformance, locale, row, tipText);
+      return true;
+    default:
+      return false;
   }
-  return @[@[@"Wi-Fi:", WifiStateText(wifi)]];
+}
+
+// the panel row of the reading of kind, one of those ReadingTexts makes
+static NSArray<NSString*>* ReadingRow(int kind)
+{
+  NSArray<NSString*>* row = nil;
+  NSString* tipText = nil;
+  ReadingTexts(kind, &row, &tipText);
+  return row;
 }
 
 // the GPU hover label of the help window's example, as the real one reads, the percentage padded (TipPercents); in the
@@ -3454,10 +3552,14 @@ static NSArray<NSArray<NSString*>*>* WifiRows(const SystemInfoWifi* wifi)
 static NSString* HelpGpuLabel(const CpuReadings* readings)
 {
 #if CPUTOPBARS_SANDBOXED
-  return TipPercents(GpuTipText(readings->gpu, -1.0));
+  const double watts = -1.0;
 #else
-  return TipPercents(GpuTipText(readings->gpu, 0.08));
+  const double watts = 0.08;
 #endif
+  NSArray<NSString*>* row = nil;
+  NSString* tipText = nil;
+  GpuTexts(readings->gpu, watts, [NSLocale currentLocale], &row, &tipText);
+  return TipPercents(tipText);
 }
 
 // the help window's Wi-Fi example, a connection as this app reads one: -50 dBm, WPA2 Personal, 802.11ax, channel 48
@@ -3486,13 +3588,19 @@ static NSString* HelpBatteryLabel(const CpuReadings* readings)
   bool charging = readings->batteryCharging;
   bool onAC = charging || readings->batteryOnAC;
   SystemInfoBattery battery = {readings->battery, charging, false, onAC, onAC ? -1 : 192, -1};
-  return TipPercents(BatteryTipText(true, &battery));
+  NSArray<NSString*>* row = nil;
+  NSString* tipText = nil;
+  BatteryTexts(true, &battery, [NSLocale currentLocale], &row, &tipText);
+  return TipPercents(tipText);
 }
 
 static NSString* HelpWifiLabel(void)
 {
   SystemInfoWifi wifi = HelpWifiSample();
-  return WifiTipText(&wifi, "192.168.1.23", "192.168.1.1", "a6:3c:12:9e:5b:70");
+  NSArray<NSString*>* row = nil;
+  NSString* tipText = nil;
+  WifiTexts(&wifi, "192.168.1.23", "192.168.1.1", "a6:3c:12:9e:5b:70", &row, &tipText);
+  return tipText;
 }
 
 // the disk hover label of the help window's example, as the real one reads: 1 TB, readings->disk of it used, its
@@ -3598,29 +3706,25 @@ static NSArray<NSView*>* HelpCoresExamples(const CpuReadings* readings, const do
     NSString* label = (extraBarItem[extra] < labels.count) ? labels[extraBarItem[extra]] : nil;
     return [label isKindOfClass:[NSString class]] ? label : @"";
   }
-  switch (CpuRenderReadingKind(barTipMask, (int)index))
+  const int kind = CpuRenderReadingKind(barTipMask, (int)index);
+  // the battery's, Wi-Fi's, memory's, the Neural Engine's, the GPU's and the CPU's, made with their panel rows
+  NSArray<NSString*>* row = nil;
+  NSString* tipText = nil;
+  if (ReadingTexts(kind, &row, &tipText))
   {
-    case CPU_RENDER_KIND_BATTERY:
-      return BatteryTipText(readingsBattery, &readingsBatteryState);
-    case CPU_RENDER_KIND_WIFI:
-      return WifiTipText(&readingsWifi, readingsWifiIp, readingsWifiRouter, readingsWifiMac);
-    case CPU_RENDER_KIND_NEURAL_ENGINE:
-      return NeuralEngineTipText(readingsNeuralEngine, readingsNeuralEngineBusy);
-    case CPU_RENDER_KIND_GPU:
-      return GpuTipText(readingsGpu, readingsGpuWatts);
+    return tipText;
+  }
+  switch (kind)
+  {
     case CPU_RENDER_KIND_EFFICIENCY:
     case CPU_RENDER_KIND_PERFORMANCE:
     {
       bool efficiency = (index == CpuRenderReadingEfficiency(barTipMask));
       return CoreKindReadingText(efficiency, efficiency ? readingsCpuEfficiency : readingsCpuPerformance, [NSLocale currentLocale]);
     }
-    // disk's, memory's and CPU's, one value to a line
+    // disk's, one value to a line, made with its panel row by readDisk
     case CPU_RENDER_KIND_DISK:
       return diskTipText ?: @"Disk usage: —";
-    case CPU_RENDER_KIND_MEMORY:
-      return [self memoryTipText];
-    case CPU_RENDER_KIND_CPU:
-      return [self cpuTipText];
     default:
       return @"";
   }
@@ -5699,116 +5803,23 @@ static void SetTipText(NSPanel* panel, NSTextField* label, NSString* text, CGFlo
 }
 
 // the readings after the menu bar's gap, as shown, each its title and value, in the bars' order: the Neural Engine and
-// the GPU while their bars are shown (GpuShown), then CPU; each its last reading (updateCPU:)
+// the GPU while their bars are shown (GpuShown), then CPU; each its last reading (updateCPU:), made with its hover label
+// (ReadingTexts)
 - (NSArray<NSArray<NSString*>*>*)readingRowsAfterGap
 {
   NSMutableArray<NSArray<NSString*>*>* rows = [NSMutableArray array];
   if (GpuShown())
   {
-    [rows addObject:[self neuralEngineRow]];
-    [rows addObject:[self gpuRow]];
+    [rows addObject:ReadingRow(CPU_RENDER_KIND_NEURAL_ENGINE)];
+    [rows addObject:ReadingRow(CPU_RENDER_KIND_GPU)];
   }
-  [rows addObject:[self cpuRow]];
+  [rows addObject:ReadingRow(CPU_RENDER_KIND_CPU)];
   return rows;
 }
 
 - (NSArray<NSString*>*)diskRow
 {
   return @[diskTitle ?: @"Disk usage:", diskText ?: @"—"];
-}
-
-// the memory's hover label, one value to a line (TipLines): "Memory usage:" and its percentage, "Free:", "Used:",
-// "Swapped:" (only while swap is read) and "Total:", every value starting in one column; "Memory usage: —" when it was
-// not read
-- (NSString*)memoryTipText
-{
-  if (!readingsMemory || (readingsMemoryTotal == 0))
-  {
-    return @"Memory usage: —";
-  }
-  NSLocale* locale = [NSLocale currentLocale];
-  uint64_t used = MIN(readingsMemoryUsed, readingsMemoryTotal);
-  NSMutableArray<NSArray<NSString*>*>* rows = [NSMutableArray arrayWithObjects:@[@"Memory usage:", PercentText(readingsMemoryUsed, readingsMemoryTotal, locale)],
-                                               @[@"Free:", GiBText(readingsMemoryTotal - used, locale)],
-                                               @[@"Used:", GiBText(used, locale)], nil];
-  if (readingsSwap)
-  {
-    [rows addObject:@[@"Swapped:", GiBText(readingsSwapUsed, locale)]];
-  }
-  [rows addObject:@[@"Total:", GiBText(readingsMemoryTotal, locale)]];
-  return TipLines(rows);
-}
-
-- (NSArray<NSString*>*)memoryRow
-{
-  NSLocale* locale = [NSLocale currentLocale];
-  NSString* memoryTitle = @"Memory usage:";
-  NSString* memoryUsed = @"—";
-  if (readingsMemory)
-  {
-    memoryTitle = TotalTitle(GiBText(readingsMemoryTotal, locale), @"Memory usage:");
-    memoryUsed = PercentText(readingsMemoryUsed, readingsMemoryTotal, locale);
-    if (readingsMemoryTotal > 0)
-    {
-      uint64_t used = MIN(readingsMemoryUsed, readingsMemoryTotal);
-      NSString* swapped = readingsSwap ? [NSString stringWithFormat:@", swapped %@", GiBText(readingsSwapUsed, locale)] : @"";
-      memoryUsed = [NSString stringWithFormat:@"%@ (free %@, used %@%@)", memoryUsed, GiBText(readingsMemoryTotal - used, locale), GiBText(used, locale), swapped];
-    }
-  }
-  return @[memoryTitle, memoryUsed];
-}
-
-- (NSArray<NSString*>*)cpuRow
-{
-  NSLocale* locale = [NSLocale currentLocale];
-  double busy = readingsCpu;
-  NSString* cpu = (busy < 0.0) ? @"—" : ShareText(busy, locale);
-  // each kind's share beside it, "21% (Efficiency cores: 30%, Performance cores: 12%)", when both were read
-  if ((busy >= 0.0) && (readingsCpuEfficiency >= 0.0) && (readingsCpuPerformance >= 0.0))
-  {
-    cpu = [NSString stringWithFormat:@"%@ (Efficiency cores: %@, Performance cores: %@)", cpu, ShareText(readingsCpuEfficiency, locale), ShareText(readingsCpuPerformance, locale)];
-  }
-  return @[@"CPU:", cpu];
-}
-
-// the CPU's hover label, one value to a line (TipLines): "CPU:", and when both kinds were read, as in cpuRow,
-// "Efficiency cores:" and "Performance cores:"; "CPU: —" when it was not read
-- (NSString*)cpuTipText
-{
-  if (readingsCpu < 0.0)
-  {
-    return @"CPU: —";
-  }
-  NSLocale* locale = [NSLocale currentLocale];
-  NSMutableArray<NSArray<NSString*>*>* rows = [NSMutableArray arrayWithObject:@[@"CPU:", ShareText(readingsCpu, locale)]];
-  if ((readingsCpuEfficiency >= 0.0) && (readingsCpuPerformance >= 0.0))
-  {
-    [rows addObject:@[@"Efficiency cores:", ShareText(readingsCpuEfficiency, locale)]];
-    [rows addObject:@[@"Performance cores:", ShareText(readingsCpuPerformance, locale)]];
-  }
-  return TipLines(rows);
-}
-
-- (NSArray<NSString*>*)gpuRow
-{
-  NSLocale* locale = [NSLocale currentLocale];
-  NSString* gpu = (readingsGpu < 0.0) ? @"—" : ShareText(fmin(readingsGpu, 1.0), locale);
-  // its power beside it, "12%  0.08 W", when IOReport gives it (the unsandboxed variant)
-  if ((readingsGpu >= 0.0) && (readingsGpuWatts >= 0.0))
-  {
-    gpu = [[NSString alloc] initWithFormat:@"%@  %.2f W" locale:locale, gpu, readingsGpuWatts];
-  }
-  return @[@"GPU:", gpu];
-}
-
-- (NSArray<NSString*>*)neuralEngineRow
-{
-  NSString* neuralEngine = (readingsNeuralEngine < 0) ? @"—" : ((readingsNeuralEngine > 0) ? @"ON" : @"OFF");
-  if (readingsNeuralEngineBusy >= 0.0)
-  {
-    neuralEngine = ShareText(readingsNeuralEngineBusy, [NSLocale currentLocale]);
-  }
-  return @[@"Neural Engine:", neuralEngine];
 }
 
 // the panel's rows as shown: uptime, read now, then the readings in the bars' order in two sections, split where the
@@ -5824,14 +5835,14 @@ static void SetTipText(NSPanel* panel, NSTextField* label, NSString* text, CGFlo
   const unsigned shown = ReadingsShown();
   if ((shown & CPU_RENDER_SHOWN_BATTERY) != 0)
   {
-    [rows addObject:@[@"Battery:", BatteryValueText(readingsBattery, &readingsBatteryState)]];
+    [rows addObject:ReadingRow(CPU_RENDER_KIND_BATTERY)];
   }
   if ((shown & CPU_RENDER_SHOWN_WIFI) != 0)
   {
-    [rows addObjectsFromArray:WifiRows(&readingsWifi)];
+    [rows addObject:ReadingRow(CPU_RENDER_KIND_WIFI)];
   }
   [rows addObject:[self diskRow]];
-  [rows addObject:[self memoryRow]];
+  [rows addObject:ReadingRow(CPU_RENDER_KIND_MEMORY)];
   [starts addIndex:rows.count];
   [rows addObjectsFromArray:[self readingRowsAfterGap]];
   for (id<MenuRows> menuRow in menuRows)
