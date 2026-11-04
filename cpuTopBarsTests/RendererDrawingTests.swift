@@ -229,6 +229,22 @@ extension FreeTests {
       return area / Double(scale * scale)
     }
 
+    // below 100% what lies behind the bolt changes by row (the fill, or the background above it), so the pixel at x, y is
+    // read against the one behind it in its own row at x = 1 pt, inside the outline and left of the bolt's box: its
+    // coverage, on the channel where the two differ most (alpha included: the background's 77, or 31, against the bolt's
+    // opaque 255), and how far, in 8-bit steps, its four channels stand from that share of the way from the one behind to
+    // the bolt. Anything else drawn there in another colour, such as the digits once drawn under the bolt, stands off
+    // that line
+    private func batteryBoltOverRow(_ image: Bitmap, scale: Int, bolt: [Double], x: Int, y: Int) -> (coverage: Double, off: Double) {
+      let behind = image.pixel(x: scale, y: y).map { Double($0) }
+      let opaque = bolt + [255]
+      let channel = (0..<4).max { abs(opaque[$0] - behind[$0]) < abs(opaque[$1] - behind[$1]) }!
+      let p = image.pixel(x: x, y: y).map { Double($0) }
+      let coverage = (p[channel] - behind[channel]) / (opaque[channel] - behind[channel])
+      let off = (0..<4).map { abs(p[$0] - (behind[$0] + coverage * (opaque[$0] - behind[$0]))) }.max()!
+      return (coverage, off)
+    }
+
     @Test(arguments: [1, 2])
     func batteryFullBoltIsSolidInEveryState(scale: Int) {
       // at 100% the fill covers the inside of the outline, and the bolt is drawn over it solid, at full opacity, in the
@@ -292,16 +308,48 @@ extension FreeTests {
           let image = render(bar: true, stripped: true, width: 120,
                              readings: batteryReadings(charge, charging: state.charging, onAC: state.onAC), light: light, scale: scale)
           let label = "charge \(charge), scale \(scale), light \(light), \(state.name)"
-          let band = scale == 2 ? [(6, 16), (7, 16), (8, 16), (9, 16)] : [(3, 8), (4, 8)]
-          for (x, y) in band {
-            let p = image.pixel(x: x, y: y).map { Double($0) }
-            guard scale == 2 else { continue }   // at 1x the band's pixels are blended, so only the outside check below reads
-            #expect(p[3] == 255 && (0..<3).allSatisfy { abs(p[$0] - bolt[$0]) <= 1.5 }, "\(label), band pixel \(x): \(p)")
-            if state.charging && !light { #expect(p[1] > p[0] + 80 && p[1] > p[2] + 80, "\(label), green dominant, pixel \(x): \(p)") }
-            if (state.charging && light) || (!state.charging && !state.onAC) {
-              #expect(p[0] > p[1] + 120 && p[0] > p[2] + 120, "\(label), red dominant, pixel \(x): \(p)")
+          if scale == 2 {
+            for x in 6..<10 {
+              let p = image.pixel(x: x, y: 16).map { Double($0) }
+              #expect(p[3] == 255 && (0..<3).allSatisfy { abs(p[$0] - bolt[$0]) <= 1.5 }, "\(label), band pixel \(x): \(p)")
+              if state.charging && !light { #expect(p[1] > p[0] + 80 && p[1] > p[2] + 80, "\(label), green dominant, pixel \(x): \(p)") }
+              if (state.charging && light) || (!state.charging && !state.onAC) {
+                #expect(p[0] > p[1] + 120 && p[0] > p[2] + 120, "\(label), red dominant, pixel \(x): \(p)")
+              }
+            }
+          } else {
+            // at 1x the band is row 8, where the bolt covers more than nine-tenths of x = 3 and 4, as at 100%
+            for x in [3, 4] {
+              let c = batteryBoltOverRow(image, scale: 1, bolt: bolt, x: x, y: 8).coverage
+              #expect(c > 0.9, "\(label), band pixel \(x): \(c)")
             }
           }
+          // inside the outline (x = 0 to 8 and heights 2 to 15, less the device pixel on each side) the column at x = 1 pt,
+          // which every pixel is read against, is the fill (alpha about 230) up to the fill's top, the charge's share of the
+          // inside's 11 pt (1x) or 24 px (2x) rounded to a device pixel, and the background (77, or 31) above it; every other
+          // pixel is the bolt over the one behind it, and nothing in another colour; outside the bolt's box, whole pixels
+          // around x = 2.125 to 6.375 and heights 5.65 to 11.35, there is no bolt. Its area by its coverage is 8.37 pt², as
+          // at 100%
+          let top = (2 * scale + 1) + Int((charge * Double(13 * scale - 2)).rounded())
+          for y in (2 * scale + 1)..<(15 * scale - 1) {
+            let a = Int(image.alpha(x: scale, y: y))
+            let expected = y < top ? 230 : (light ? 31 : 77)
+            #expect(abs(a - expected) <= 2, "\(label), the column at 1 pt, height \(y): alpha \(a), expected \(expected)")
+          }
+          let box = scale == 2 ? (x: 4..<13, y: 11..<23) : (x: 2..<7, y: 5..<12)
+          var area = 0.0
+          for y in (2 * scale + 1)..<(15 * scale - 1) {
+            for x in 1..<(8 * scale - 1) {
+              let (c, off) = batteryBoltOverRow(image, scale: scale, bolt: bolt, x: x, y: y)
+              #expect(off <= 3, "\(label), pixel \(x), \(y): \(off) off the line from behind to the bolt, coverage \(c)")
+              if !(box.x.contains(x) && box.y.contains(y)) {
+                #expect(abs(c) < 0.02, "\(label), pixel \(x), \(y), outside the bolt's box: coverage \(c)")
+              }
+              area += c
+            }
+          }
+          area /= Double(scale * scale)
+          #expect(abs(area - 8.37) < 0.4, "\(label), bolt area \(area)")
           // no bolt left of its box, inside the outline (x = 1 pt, and at 2x 1.5 and 6.5): the fill where the charge reaches
           // height 9.5, else the background alone
           let expected = charge > 0.5 ? 230 : (light ? 31 : 77)
