@@ -89,13 +89,7 @@
 #define APP_DEFAULT_ICON_NAME       "GenericApplicationIcon.icns"
 #define PROCESS_DEFAULT_ICON_NAME   "ExecutableBinaryIcon.icns"
 
-static NSString* GranularityKey = @"GranularityKey";
 static NSString* RefreshKey = @"RefreshKey";
-static NSString* StyleKey = @"StyleKey";
-static NSString* TickLineKey = @"TickLineKey";
-static NSString* TickWidthKey = @"TickWidthKey";
-static NSString* AppearanceKey = @"AppearanceKey";
-static NSString* ThemeKey = @"ThemeKey";
 static NSString* ShowBarsKey = @"ShowBarsKey";
 static NSString* ShowGpuNeuralEngineKey = @"ShowGpuNeuralEngine";
 static NSString* ShowBatteryWifiKey = @"ShowBatteryWifi";
@@ -367,6 +361,12 @@ static NSString* GBText(uint64_t bytes, NSLocale* locale)
   return [NSString stringWithFormat:@"%@ TB", OneDecimal((double)bytes / 1e12, locale)];
 }
 
+// "57%": a share as a whole percentage in the locale's digits; it clamps nothing, each caller clamps as it needs
+static NSString* ShareText(double share, NSLocale* locale)
+{
+  return [[NSString alloc] initWithFormat:@"%ld%%" locale:locale, lround(share * 100.0)];
+}
+
 // "57%": part of whole as a whole percentage, 0% to 100%; "—" when whole is 0
 static NSString* PercentText(uint64_t part, uint64_t whole, NSLocale* locale)
 {
@@ -375,7 +375,7 @@ static NSString* PercentText(uint64_t part, uint64_t whole, NSLocale* locale)
     return @"—";
   }
   long percent = MIN(MAX(lround(100.0 * (double)part / (double)whole), 0L), 100L);
-  return [[NSString alloc] initWithFormat:@"%ld%%" locale:locale, percent];
+  return ShareText((double)percent / 100.0, locale);
 }
 
 // "0.51 GB", "1.23 GB": a process's memory, always in GB, in units of 1024, two decimals
@@ -2008,22 +2008,22 @@ static char readingsWifiRouter[64] = "";
 #define BAR_WIDTH_EXTRA             (1.0)   // pt each bar is drawn wider than its width setting
 
 static CGFloat tickHeight = 16.0;
-static CGFloat tickWidth = 3.0;      // the width setting: 1 Thin, 2 Standard, 3 Thick; a bar is drawn BAR_WIDTH_EXTRA wider
+static CGFloat tickWidth = 3.0;      // the width setting, fixed at 3; a bar is drawn BAR_WIDTH_EXTRA wider
 static CGFloat tickSpaceWidth = 1.0;
 static CGFloat tickTotalWidth = 0.0;
 static CGFloat imageWidth = 0.0;
 static CGFloat graphWidth = 0.0;     // the core graph alone, as the sine and flat previews draw it: imageWidth without the bars
 static CGFloat drawWidth = 3.0;      // the width each bar or dot is drawn: the width setting plus BAR_WIDTH_EXTRA, 4 for the one package bar, 3 for dots; core bars past CPU_RENDER_THIN_FROM are thinner (CpuRenderCoreWidth)
 
-static int granularity = 0;
+static int granularity = 2;
 static int coreSplit = 0;            // the core graph's E-cores' bars, which the E-cores' bar heads, the P-cores' bar after them (CpuRenderEfficiencyBars); 0: the five bars in one block
 
 static bool bar = true;
 
 static bool stripped = true;
 
-static bool colored = false;
-static int theme = THEME_YELLOW;
+static bool colored = true;
+static int theme = THEME_BLUE;
 
 static bool showBars = true;         // the disk, memory, CPU, E-cores' and P-cores' bars left of the graph
 static bool showGpuNeuralEngine = true; // with them, the GPU's bar and the Neural Engine's
@@ -2231,27 +2231,6 @@ static NSMutableSet<NSTask*>* runningTasks = nil;
 
 - (void)updateUI
 {
-  [self.packageButton setState:NSControlStateValueOff];
-  [self.coreButton setState:NSControlStateValueOff];
-  [self.logicalButton setState:NSControlStateValueOff];
-  
-  [self.barButton setState:NSControlStateValueOff];
-  [self.dotButton setState:NSControlStateValueOff];
-  
-  [self.solidButton setState:NSControlStateValueOff];
-  [self.strippedButton setState:NSControlStateValueOff];
-  
-  [self.thinButton setState:NSControlStateValueOff];
-  [self.standardButton setState:NSControlStateValueOff];
-  [self.thickButton setState:NSControlStateValueOff];
-  
-  [self.greyButton setState:NSControlStateValueOff];
-  [self.colorButton setState:NSControlStateValueOff];
-  
-  [self.yellowButton setState:NSControlStateValueOff];
-  [self.greenButton setState:NSControlStateValueOff];
-  [self.blueButton setState:NSControlStateValueOff];
-
   showBarsSwitch.state = showBars ? NSControlStateValueOn : NSControlStateValueOff;
   showGpuSwitch.state = showGpuNeuralEngine ? NSControlStateValueOn : NSControlStateValueOff;
   showGpuSwitch.enabled = showBars;
@@ -2260,120 +2239,7 @@ static NSMutableSet<NSTask*>* runningTasks = nil;
   showBarLettersSwitch.state = showBarLetters ? NSControlStateValueOn : NSControlStateValueOff;
   showBarLettersSwitch.enabled = showBars;
   topRowsChoice.selectedSegment = TopRowsChoiceIndex();
-    
-  if (granularity == 0)
-  {
-    [self.packageButton setState:NSControlStateValueOn];
-
-    [self.thinButton setEnabled:NO];
-    [self.standardButton setEnabled:NO];
-    [self.thickButton setEnabled:NO];
-  }
-  else if (granularity == 1)
-  {
-    [self.coreButton setState:NSControlStateValueOn];
-    
-    if (bar)
-    {
-      [self.thinButton setEnabled:YES];
-      [self.standardButton setEnabled:YES];
-      [self.thickButton setEnabled:YES];
-    }
-  }
-  else
-  {
-    [self.logicalButton setState:NSControlStateValueOn];
-
-    [self.thinButton setEnabled:YES];
-    [self.standardButton setEnabled:YES];
-    [self.thickButton setEnabled:YES];
-  }
-  
-  if (bar)
-  {
-    [self.barButton setState:NSControlStateValueOn];
-    [self.dotButton setState:NSControlStateValueOff];
-
-    [self.solidButton setEnabled:YES];
-    [self.strippedButton setEnabled:YES];
-    if (granularity != 0)
-    {
-      [self.thinButton setEnabled:YES];
-      [self.standardButton setEnabled:YES];
-      [self.thickButton setEnabled:YES];
-    }
-    
-    [self.greyButton setEnabled:YES];
-  }
-  else
-  {
-    colored = true;
-    
-    [self.barButton setState:NSControlStateValueOff];
-    [self.dotButton setState:NSControlStateValueOn];
-
-    [self.solidButton setEnabled:NO];
-    [self.strippedButton setEnabled:NO];
-    [self.thinButton setEnabled:NO];
-    [self.standardButton setEnabled:NO];
-    [self.thickButton setEnabled:NO];
-
-    [self.greyButton setEnabled:NO];
-  }
-  
-  if (!stripped)
-  {
-    [self.solidButton setState:NSControlStateValueOn];
-  }
-  else
-  {
-    [self.strippedButton setState:NSControlStateValueOn];
-  }
-  
-  if (tickWidth == 1.0)
-  {
-    [self.thinButton setState:NSControlStateValueOn];
-  }
-  else if (tickWidth == 2.0)
-  {
-    [self.standardButton setState:NSControlStateValueOn];
-  }
-  else
-  {
-    [self.thickButton setState:NSControlStateValueOn];
-  }
-  
   refreshChoice.selectedSegment = RefreshChoiceIndex();
-  
-  if (!colored)
-  {
-    [self.greyButton setState:NSControlStateValueOn];
-
-    [self.yellowButton setEnabled:NO];
-    [self.greenButton setEnabled:NO];
-    [self.blueButton setEnabled:NO];
-  }
-  else
-  {
-    [self.colorButton setState:NSControlStateValueOn];
-
-    [self.yellowButton setEnabled:YES];
-    [self.greenButton setEnabled:YES];
-    [self.blueButton setEnabled:YES];
-  }
-  
-  if (theme == THEME_GREEN)
-  {
-    [self.greenButton setState:NSControlStateValueOn];
-  }
-  else if (theme == THEME_BLUE)
-  {
-    [self.blueButton setState:NSControlStateValueOn];
-  }
-  else
-  {
-    [self.yellowButton setState:NSControlStateValueOn];
-  }
 }
 
 - (int)getSpacesCountFor:(NSMutableString*)string width:(CGFloat)target
@@ -2381,17 +2247,13 @@ static NSMutableSet<NSTask*>* runningTasks = nil;
   CGFloat test_width = [string sizeWithAttributes:attributesGrey].width;
   CGFloat room = target - test_width;
   int count = (int)round(room / spaceWidth);
-  //printf("  spaces %d\n", spaces);
 
   CGFloat actualLeft = test_width + ((count-1) * spaceWidth);
   CGFloat diffLeft = fabs(target-actualLeft);
-  //printf("  diffLeft %f %f\n", diffLeft, actualLeft);
   CGFloat actual = test_width + (count * spaceWidth);
   CGFloat diff = fabs(target-actual);
-  //printf("  diff %f %f\n", diff, actual);
   CGFloat actualRight = test_width + ((count+1) * spaceWidth);
   CGFloat diffRight = fabs(target-actualRight);
-  //printf("  diffRight %f %f\n", diffRight, actualRight);
   
   if (diffLeft < diffRight)
   {
@@ -2452,7 +2314,6 @@ static BOOL spaces_init = NO;
   {
     return string;
   }
-  //return [NSString stringWithFormat:@"%--s %*c %6.1f%%", name, spaces, SPACE_THIN, cpu];
 }
 
 - (NSString*)getStringForMem:(uint64_t)mem known:(int)known width:(CGFloat)target
@@ -2506,7 +2367,6 @@ static BOOL spaces_init = NO;
     topNameCache[name] = padded;
   }
   return padded;
-  //return [NSString stringWithFormat:@"%--s %*c %6.1f%%", name, spaces, SPACE_THIN, cpu];
 }
 
 // Decided once per pid, and again when the pid runs another executable. Not redone when the process
@@ -2578,9 +2438,6 @@ static void SetPaddingFont(NSMutableAttributedString* title)
   [item setImage:decision.menuImage];
   // shown by showRowTip while frozen, never as the item's toolTip
   [item setRepresentedObject:decision.tooltip];
-  
-  //NSSize size = [[item title] sizeWithAttributes:attributesGrey];
-  //return size.width;
 }
 
 // the text of the row that counts other users' processes; "" when there are none
@@ -2633,10 +2490,6 @@ static NSString* OthersRowText(int count)
   }
   for (int i=0; i<TOP_COUNT; i++)
   {
-    //NSWorkspace *ws = [NSWorkspace sharedWorkspace];
-    //NSString *fullPath = [ws fullPathForApplication:[path lastPathComponent]];
-    //NSImage *appIcon = [ws iconForFileType:NSFileTypeForHFSTypeCode(kGenericApplicationIcon)];
-    
     if (i >= MIN(topCount, topShown))
     {
       [topMenus[i] setHidden:YES];
@@ -2892,18 +2745,6 @@ static NSString* OthersRowText(int count)
   
   [menu addItem:[NSMenuItem separatorItem]];
 
-//  {
-//    NSMenuItem* item = [menu addItemWithTitle:@"Process Explorer" action:@selector(processExplorer:) keyEquivalent:@""];
-//    [item setAttributedTitle:[[NSAttributedString alloc] initWithString:[item title] attributes:attributesStandard]];
-//    //NSImage* appIcon = [NSImage imageNamed:@"NSRevealFreestandingTemplate"];
-//    //NSImage* appIcon = [NSImage imageNamed:@"NSQuickLookTemplate"];
-//    //NSLog(@"appIcon: %@", appIcon);
-//    //[appIcon setSize:NSMakeSize(MENU_ICON_SIZE-2.0, MENU_ICON_SIZE-2.0)];
-//    //[item setImage:appIcon];
-//  }
-//
-//  [menu addItem:[NSMenuItem separatorItem]];
-
   {
     NSMenuItem* item = [menu addItemWithTitle:@"Launch \"Activity Monitor\"" action:@selector(launchActivityMonitor:) keyEquivalent:@""];
     [item setAttributedTitle:[[NSAttributedString alloc] initWithString:[item title] attributes:attributesStandard]];
@@ -2938,7 +2779,6 @@ static NSString* OthersRowText(int count)
   {
     NSMenuItem* item = [menu addItemWithTitle:[NSString stringWithFormat:@"Open %@ Settings...", AppName()] action:@selector(openPreferences:) keyEquivalent:@""];
     [item setAttributedTitle:[[NSAttributedString alloc] initWithString:[item title] attributes:attributesStandard]];
-    //NSImage* appIcon = [NSImage imageNamed:@"AppIcon"];
     NSImage* appIcon = [NSImage imageNamed:@"NSPreferencesGeneral"];
     [appIcon setSize:NSMakeSize(MENU_ICON_SIZE+2.0, MENU_ICON_SIZE+2.0)];
     [item setImage:appIcon];
@@ -3026,8 +2866,8 @@ NSView* MenuRowsHelpExample(const CpuReadings* readings, const double* coreLoads
 {
   CpuSamplerUpdate(&cpu_info);
   // the menu bar's image has the block's letters under its bars, and the extra bars' own (barLetters) under theirs, while
-  // Settings' "Show letters under the bars" is on, and is then taller (CpuRenderImageHeight); not at the Thin width, whose
-  // 5-pt slots leave no room between the 5-pt letters; the Settings previews and the help's examples draw without them
+  // Settings' "Show letters under the bars" is on, and is then taller (CpuRenderImageHeight); not at a 1-pt width setting, whose
+  // 5-pt slots leave no room between the 5-pt letters (the fixed setting is 3); the Settings previews and the help's examples draw without them
   CpuReadings lettered = {};
   if (readings != NULL)
   {
@@ -3293,7 +3133,7 @@ static bool BarTipIsCores(NSInteger index)
 // title line of a split core graph's label (CoresTipText)
 static NSString* CoreKindReadingValue(double busy, NSLocale* locale)
 {
-  return (busy < 0.0) ? @"—" : [[NSString alloc] initWithFormat:@"%ld%%" locale:locale, lround(busy * 100.0)];
+  return (busy < 0.0) ? @"—" : ShareText(busy, locale);
 }
 
 // the core graph's label from loads, each logical CPU's (0..1; below 0, not read: "—"), laid out as Wi-Fi's: a section per kind of
@@ -3360,7 +3200,7 @@ static NSString* CoresTipText(const std::vector<double>& loads, const char* kind
     {
       bool marked = (hovered >= 0) && (perBar > 0) && ((NSInteger)(cpus[k] / perBar) == hovered);
       NSString* name = [NSString stringWithFormat:@"%@%c%lu:", marked ? @"› " : @"  ", letters[section], (unsigned long)k];
-      NSString* load = (loads[cpus[k]] < 0.0) ? @"—" : [[NSString alloc] initWithFormat:@"%ld%%" locale:locale, lround(100.0 * loads[cpus[k]])];
+      NSString* load = (loads[cpus[k]] < 0.0) ? @"—" : ShareText(loads[cpus[k]], locale);
       [lines addObject:[[name stringByPaddingToLength:width withString:@" " startingAtIndex:0] stringByAppendingString:load]];
     }
   }
@@ -3462,7 +3302,7 @@ static NSString* GpuTipText(double gpu, double watts)
   }
   NSLocale* locale = [NSLocale currentLocale];
   NSMutableArray<NSArray<NSString*>*>* rows = [NSMutableArray arrayWithObject:
-    @[@"GPU:", [[NSString alloc] initWithFormat:@"%ld%%" locale:locale, lround(fmin(gpu, 1.0) * 100.0)]]];
+    @[@"GPU:", ShareText(fmin(gpu, 1.0), locale)]];
   if (watts >= 0.0)
   {
     [rows addObject:@[@"Power:", [[NSString alloc] initWithFormat:@"%.2f W" locale:locale, watts]]];
@@ -3474,7 +3314,7 @@ static NSString* NeuralEngineTipText(int state, double busy)
 {
   if (busy >= 0.0)
   {
-    return [[NSString alloc] initWithFormat:@"Neural Engine: %ld%%" locale:[NSLocale currentLocale], lround(fmin(busy, 1.0) * 100.0)];
+    return [@"Neural Engine: " stringByAppendingString:ShareText(fmin(busy, 1.0), [NSLocale currentLocale])];
   }
   if (state < 0)
   {
@@ -3493,7 +3333,7 @@ static NSString* BatteryValueText(bool read, const SystemInfoBattery* battery)
   }
   char state[64];
   SystemInfoBatteryStateText(battery, state, sizeof(state));
-  return [[NSString alloc] initWithFormat:@"%ld%% (%@)" locale:[NSLocale currentLocale], lround(fmin(fmax(battery->level, 0.0), 1.0) * 100.0), @(state)];
+  return [NSString stringWithFormat:@"%@ (%@)", ShareText(fmin(fmax(battery->level, 0.0), 1.0), [NSLocale currentLocale]), @(state)];
 }
 
 // the battery's hover label, one value to a line (TipLines): "Battery:" and the charge, "State:" ("charged", "charging",
@@ -3505,7 +3345,7 @@ static NSString* BatteryTipText(bool read, const SystemInfoBattery* battery)
   {
     return @"Battery: —";
   }
-  NSString* charge = [[NSString alloc] initWithFormat:@"%ld%%" locale:[NSLocale currentLocale], lround(fmin(fmax(battery->level, 0.0), 1.0) * 100.0)];
+  NSString* charge = ShareText(fmin(fmax(battery->level, 0.0), 1.0), [NSLocale currentLocale]);
   NSString* state = @"on battery";
   if (battery->charged)
   {
@@ -3927,86 +3767,20 @@ static bool BarTipIsWifi(void)
   }
 }
 
-- (void)renderPrefsRealWithLight:(BOOL)light readings:(const CpuReadings*)readings
+// draws one Settings preview: the view takes the width the render draws at (placeDemoPreviews, once all three are
+// drawn, spreads them across the card), and the image is made anew each time
+- (void)renderPrefsView:(NSImageView*)view info:(CpuSummaryInfo*)info width:(CGFloat)width light:(BOOL)light readings:(const CpuReadings*)readings
 {
-  [self.realDemoView setBoundsSize:NSMakeSize(imageWidth, tickHeight)];
-  [self.realDemoView setFrameSize:NSMakeSize(imageWidth, tickHeight)];
-  [self placeDemoPreviews];
-  static NSImage* image = nil;
+  [view setBoundsSize:NSMakeSize(width, tickHeight)];
+  [view setFrameSize:NSMakeSize(width, tickHeight)];
+  NSImage* image = [[NSImage alloc] initWithSize:NSMakeSize(width, tickHeight)];
+  [image lockFocus];
   {
-//    if (image == nil)
-    {
-      image = [[NSImage alloc] initWithSize:NSMakeSize(imageWidth, tickHeight)];
-    }
-//    else
-//    {
-//      image = self.realDemoView.image;
-//    }
-    
-    [image lockFocus];
-    {
-      CGContextRef ctx = [[NSGraphicsContext currentContext] CGContext];
-      CpuRender(&cpu_info, ctx, light, granularity, bar, stripped, colored, drawWidth, tickTotalWidth, imageWidth, theme, readings);
-    }
-    [image unlockFocus];
+    CGContextRef ctx = [[NSGraphicsContext currentContext] CGContext];
+    CpuRender(info, ctx, light, granularity, bar, stripped, colored, drawWidth, tickTotalWidth, width, theme, readings);
   }
-  self.realDemoView.image = image;
-}
-
-- (void)renderPrefsSinWithLight:(BOOL)light
-{
-  CpuSamplerSineDemoUpdate(&cpu_sine_demo_info, speed);
-
-  [self.sineDemoView setBoundsSize:NSMakeSize(graphWidth, tickHeight)];
-  [self.sineDemoView setFrameSize:NSMakeSize(graphWidth, tickHeight)];
-  [self placeDemoPreviews];
-  static NSImage* image = nil;
-  {
-//    if (image == nil)
-    {
-      image = [[NSImage alloc] initWithSize:NSMakeSize(graphWidth, tickHeight)];
-    }
-//    else
-//    {
-//      image = self.sineDemoView.image;
-//    }
-    
-    [image lockFocus];
-    {
-      CGContextRef ctx = [[NSGraphicsContext currentContext] CGContext];
-      CpuRender(&cpu_sine_demo_info, ctx, light, granularity, bar, stripped, colored, drawWidth, tickTotalWidth, graphWidth, theme, NULL);
-    }
-    [image unlockFocus];
-  }
-  self.sineDemoView.image = image;
-}
-
-- (void)renderPrefsFlatWithLight:(BOOL)light
-{
-  CpuSamplerFlatDemoUpdate(&cpu_flat_demo_info, speed);
-  
-  [self.flatDemoView setBoundsSize:NSMakeSize(graphWidth, tickHeight)];
-  [self.flatDemoView setFrameSize:NSMakeSize(graphWidth, tickHeight)];
-  [self placeDemoPreviews];
-  static NSImage* image = nil;
-  {
-//    if (image == nil)
-    {
-      image = [[NSImage alloc] initWithSize:NSMakeSize(graphWidth, tickHeight)];
-    }
-//    else
-//    {
-//      image = self.flatDemoView.image;
-//    }
-    
-    [image lockFocus];
-    {
-      CGContextRef ctx = [[NSGraphicsContext currentContext] CGContext];
-      CpuRender(&cpu_flat_demo_info, ctx, light, granularity, bar, stripped, colored, drawWidth, tickTotalWidth, graphWidth, theme, NULL);
-    }
-    [image unlockFocus];
-  }
-  self.flatDemoView.image = image;
+  [image unlockFocus];
+  view.image = image;
 }
 
 // the bars the MenuRows classes add right of the core graph, in their order, with no limit, whether the app's own bars
@@ -4299,33 +4073,14 @@ static void WifiRead(SystemInfoWifi* wifi, bool full)
   if ([self.window isVisible])
   {
     bool light = IsLight(self.window.effectiveAppearance);
-    [self renderPrefsRealWithLight:light readings:shown];
-    [self renderPrefsSinWithLight:light];
-    [self renderPrefsFlatWithLight:light];
+    CpuSamplerSineDemoUpdate(&cpu_sine_demo_info, speed);
+    CpuSamplerFlatDemoUpdate(&cpu_flat_demo_info, speed);
+    [self renderPrefsView:self.realDemoView info:&cpu_info width:imageWidth light:light readings:shown];
+    [self renderPrefsView:self.sineDemoView info:&cpu_sine_demo_info width:graphWidth light:light readings:NULL];
+    [self renderPrefsView:self.flatDemoView info:&cpu_flat_demo_info width:graphWidth light:light readings:NULL];
+    [self placeDemoPreviews];
   }
 }
-
-//static int _task_extmod_info_for_pid(pid_t pid, struct task_extmod_info *info)
-//{
-//  task_name_t task;
-//  kern_return_t kr = task_name_for_pid(mach_task_self(), pid, &task);
-//  if (kr != KERN_SUCCESS)
-//  {
-//    return kr;
-//  }
-//  else
-//  {
-//    memset(info, 0, sizeof(struct task_extmod_info));
-//    mach_msg_type_number_t count = TASK_EXTMOD_INFO_COUNT;
-//    kr = task_info(task, TASK_EXTMOD_INFO, (task_info_t)info, &count);
-//    mach_port_deallocate(mach_task_self(), task);
-//    if (kr != KERN_SUCCESS)
-//    {
-//      return kr;
-//    }
-//  }
-//  return 0;
-//}
 
 // Samples on every tick, with the menu closed too (about 1-2 ms), so that the CPU% always covers the
 // last interval and the list is current the moment the menu opens. Nothing is sampled while frozen.
@@ -4557,16 +4312,6 @@ static void WifiRead(SystemInfoWifi* wifi, bool full)
   [self updateCPU:nil];
 }
 
-- (void)removeUserDefaults
-{
-    NSUserDefaults * userDefaults = [NSUserDefaults standardUserDefaults];
-    NSDictionary * dict = [userDefaults dictionaryRepresentation];
-    for (id key in dict) {
-        [userDefaults removeObjectForKey:key];
-    }
-    [userDefaults synchronize];
-}
-
 // the refresh interval Settings offers: 0.1, 0.2 or 0.5 s; any other stored value counts as 0.2, the default
 static double RefreshInterval(void)
 {
@@ -4589,10 +4334,6 @@ static double TopInterval(void)
 
 - (void)setupPreferences
 {
-#if 0
-  [self removeUserDefaults];
-#endif
-  
   [[NSUserDefaults standardUserDefaults] registerDefaults:@{RefreshKey:@0.2}];
   [[NSUserDefaults standardUserDefaults] registerDefaults:@{ShowBarsKey:@YES}];
   [[NSUserDefaults standardUserDefaults] registerDefaults:@{ShowGpuNeuralEngineKey:@YES}];
@@ -4734,7 +4475,13 @@ static NSTimeInterval TopDelay(void)
   {
     // the first readings after the pause would average over all of it: take them now as the new baselines
     CpuSamplerUpdate(&cpu_info);
+    // that sample is only a baseline, never shown: with the menu open through the pause updateTop would show its rows,
+    // so it runs with refreshTop off, and baselineOnly holds the rows until the next sample
+    bool refreshing = refreshTop;
+    refreshTop = false;
     [self updateTop:nil];
+    refreshTop = refreshing;
+    baselineOnly = true;
     [self setupTimers];
     // and the next process sample soon, so that an open menu does not show the pause's average for a whole interval
     [self startTopTimer:MIN(TOP_MIN_INTERVAL, TopInterval())];
@@ -5023,7 +4770,6 @@ static NSTimeInterval TopDelay(void)
 #if !CPUTOPBARS_SANDBOXED
   [self stopTopTool];
 #endif
-  //[[NSUserDefaults standardUserDefaults] synchronize];
 }
 
 - (IBAction)openPreferences:(id)sender
@@ -5061,11 +4807,6 @@ static NSTimeInterval TopDelay(void)
   [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"https://give.michaeljfox.org/halfmarble"]];
 }
 #endif
-
-- (void)processExplorer:(id)sender
-{
-  NSLog(@"processExplorer");
-}
 
 // the views the rows add to the inspector's header, on a line of their own below its text, at its right; with none,
 // nothing here changes the header
@@ -5240,7 +4981,6 @@ static NSTimeInterval TopDelay(void)
   [procThreadsTextView setString:live];
 #endif
 
-  //if ([self.top isVisible] == NO)
   {
     [NSApp activateIgnoringOtherApps:YES];
     [self.top center];
@@ -5316,33 +5056,6 @@ static NSTimeInterval TopDelay(void)
   [self launchAppAt:appPath with:@[]];
 }
 
-- (IBAction)packageButtonClicked:(id)sender
-{
-  granularity = 0;
-  tickWidth = [[NSUserDefaults standardUserDefaults] doubleForKey:TickWidthKey];
-  [[NSUserDefaults standardUserDefaults] setDouble:granularity forKey:GranularityKey];
-
-  [self updateUI];
-}
-
-- (IBAction)coreButtonClicked:(id)sender
-{
-  granularity = 1;
-  tickWidth = [[NSUserDefaults standardUserDefaults] doubleForKey:TickWidthKey];
-  [[NSUserDefaults standardUserDefaults] setDouble:granularity forKey:GranularityKey];
-
-  [self updateUI];
-}
-
-- (IBAction)logicalButtonClicked:(id)sender
-{
-  granularity = 2;
-  tickWidth = [[NSUserDefaults standardUserDefaults] doubleForKey:TickWidthKey];
-  [[NSUserDefaults standardUserDefaults] setDouble:granularity forKey:GranularityKey];
-  
-  [self updateUI];
-}
-
 - (IBAction)fastButtonClicked:(id)sender
 {
   speed = 1.0f;
@@ -5371,114 +5084,6 @@ static NSTimeInterval TopDelay(void)
 
   [self updateUI];
   [self startGraphTimer];
-}
-
-- (IBAction)barButtonClicked:(id)sender
-{
-  bar = true;
-  tickWidth = [[NSUserDefaults standardUserDefaults] doubleForKey:TickWidthKey];
-  colored = [[NSUserDefaults standardUserDefaults] boolForKey:AppearanceKey];
-  [[NSUserDefaults standardUserDefaults] setBool:bar forKey:StyleKey];
-
-  [self updateUI];
-}
-
-- (IBAction)dotButtonClicked:(id)sender
-{
-  bar = false;
-  colored = false;
-  [[NSUserDefaults standardUserDefaults] setBool:bar forKey:StyleKey];
-
-  [self updateUI];
-}
-
-- (IBAction)solidButtonClicked:(id)sender
-{
-  stripped = false;
-  [[NSUserDefaults standardUserDefaults] setBool:stripped forKey:TickLineKey];
-  
-  [self updateUI];
-}
-
-- (IBAction)strippedButtonClicked:(id)sender
-{
-  stripped = true;
-  [[NSUserDefaults standardUserDefaults] setBool:stripped forKey:TickLineKey];
-  
-  [self updateUI];
-}
-
-- (IBAction)thinButtonClicked:(id)sender
-{
-  tickWidth = 1.0;
-  [[NSUserDefaults standardUserDefaults] setDouble:tickWidth forKey:TickWidthKey];
-  
-  [self updateUI];
-}
-
-- (IBAction)standardButtonClicked:(id)sender
-{
-  tickWidth = 2.0;
-  [[NSUserDefaults standardUserDefaults] setDouble:tickWidth forKey:TickWidthKey];
-  
-  [self updateUI];
-}
-
-- (IBAction)thickButtonClicked:(id)sender
-{
-  tickWidth = 3.0;
-  [[NSUserDefaults standardUserDefaults] setDouble:tickWidth forKey:TickWidthKey];
-  
-  [self updateUI];
-}
-
-- (IBAction)greyButtonClicked:(id)sender
-{
-  colored = false;
-  [[NSUserDefaults standardUserDefaults] setBool:colored forKey:AppearanceKey];
-  
-  [self updateUI];
-}
-
-- (IBAction)colorButtonClicked:(id)sender
-{
-  colored = true;
-  [[NSUserDefaults standardUserDefaults] setBool:colored forKey:AppearanceKey];
-  
-  [self updateUI];
-}
-
-- (IBAction)yellow:(id)sender
-{
-  theme = THEME_YELLOW;
-
-  [self.yellowButton setState:NSControlStateValueOn];
-  [self.greenButton setState:NSControlStateValueOff];
-  [self.blueButton setState:NSControlStateValueOff];
-
-  [[NSUserDefaults standardUserDefaults] setDouble:theme forKey:ThemeKey];
-}
-
-- (IBAction)green:(id)sender
-{
-  theme = THEME_GREEN;
-  
-  [self.yellowButton setState:NSControlStateValueOff];
-  [self.greenButton setState:NSControlStateValueOn];
-  [self.blueButton setState:NSControlStateValueOff];
-
-  [[NSUserDefaults standardUserDefaults] setDouble:theme forKey:ThemeKey];
-}
-
-- (IBAction)blue:(id)sender
-{
-  theme = THEME_BLUE;
-  
-  [self.yellowButton setState:NSControlStateValueOff];
-  [self.greenButton setState:NSControlStateValueOff];
-  [self.blueButton setState:NSControlStateValueOn];
-
-  [[NSUserDefaults standardUserDefaults] setDouble:theme forKey:ThemeKey];
 }
 
 - (IBAction)showBarsButtonClicked:(id)sender
@@ -6157,11 +5762,11 @@ static void SetTipText(NSPanel* panel, NSTextField* label, NSString* text, CGFlo
 {
   NSLocale* locale = [NSLocale currentLocale];
   double busy = readingsCpu;
-  NSString* cpu = (busy < 0.0) ? @"—" : [[NSString alloc] initWithFormat:@"%ld%%" locale:locale, lround(busy * 100.0)];
+  NSString* cpu = (busy < 0.0) ? @"—" : ShareText(busy, locale);
   // each kind's share beside it, "21% (Efficiency cores: 30%, Performance cores: 12%)", when both were read
   if ((busy >= 0.0) && (readingsCpuEfficiency >= 0.0) && (readingsCpuPerformance >= 0.0))
   {
-    cpu = [[NSString alloc] initWithFormat:@"%@ (Efficiency cores: %ld%%, Performance cores: %ld%%)" locale:locale, cpu, lround(readingsCpuEfficiency * 100.0), lround(readingsCpuPerformance * 100.0)];
+    cpu = [NSString stringWithFormat:@"%@ (Efficiency cores: %@, Performance cores: %@)", cpu, ShareText(readingsCpuEfficiency, locale), ShareText(readingsCpuPerformance, locale)];
   }
   return @[@"CPU:", cpu];
 }
@@ -6175,11 +5780,11 @@ static void SetTipText(NSPanel* panel, NSTextField* label, NSString* text, CGFlo
     return @"CPU: —";
   }
   NSLocale* locale = [NSLocale currentLocale];
-  NSMutableArray<NSArray<NSString*>*>* rows = [NSMutableArray arrayWithObject:@[@"CPU:", [[NSString alloc] initWithFormat:@"%ld%%" locale:locale, lround(readingsCpu * 100.0)]]];
+  NSMutableArray<NSArray<NSString*>*>* rows = [NSMutableArray arrayWithObject:@[@"CPU:", ShareText(readingsCpu, locale)]];
   if ((readingsCpuEfficiency >= 0.0) && (readingsCpuPerformance >= 0.0))
   {
-    [rows addObject:@[@"Efficiency cores:", [[NSString alloc] initWithFormat:@"%ld%%" locale:locale, lround(readingsCpuEfficiency * 100.0)]]];
-    [rows addObject:@[@"Performance cores:", [[NSString alloc] initWithFormat:@"%ld%%" locale:locale, lround(readingsCpuPerformance * 100.0)]]];
+    [rows addObject:@[@"Efficiency cores:", ShareText(readingsCpuEfficiency, locale)]];
+    [rows addObject:@[@"Performance cores:", ShareText(readingsCpuPerformance, locale)]];
   }
   return TipLines(rows);
 }
@@ -6187,7 +5792,7 @@ static void SetTipText(NSPanel* panel, NSTextField* label, NSString* text, CGFlo
 - (NSArray<NSString*>*)gpuRow
 {
   NSLocale* locale = [NSLocale currentLocale];
-  NSString* gpu = (readingsGpu < 0.0) ? @"—" : [[NSString alloc] initWithFormat:@"%ld%%" locale:locale, lround(fmin(readingsGpu, 1.0) * 100.0)];
+  NSString* gpu = (readingsGpu < 0.0) ? @"—" : ShareText(fmin(readingsGpu, 1.0), locale);
   // its power beside it, "12%  0.08 W", when IOReport gives it (the unsandboxed variant)
   if ((readingsGpu >= 0.0) && (readingsGpuWatts >= 0.0))
   {
@@ -6201,7 +5806,7 @@ static void SetTipText(NSPanel* panel, NSTextField* label, NSString* text, CGFlo
   NSString* neuralEngine = (readingsNeuralEngine < 0) ? @"—" : ((readingsNeuralEngine > 0) ? @"ON" : @"OFF");
   if (readingsNeuralEngineBusy >= 0.0)
   {
-    neuralEngine = [[NSString alloc] initWithFormat:@"%ld%%" locale:[NSLocale currentLocale], lround(readingsNeuralEngineBusy * 100.0)];
+    neuralEngine = ShareText(readingsNeuralEngineBusy, [NSLocale currentLocale]);
   }
   return @[@"Neural Engine:", neuralEngine];
 }

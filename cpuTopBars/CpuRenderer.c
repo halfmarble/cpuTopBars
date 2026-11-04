@@ -845,7 +845,7 @@ static int _letter_index(char letter)
 // its kind, and one under each wide extra reading that has a letter of _letter_chars (none under a narrow one, whose
 // slot is too tight): _letter_bits at 1 pt a pixel, 5 x 5 pt from the image's bottom, centred across the bar on device
 // pixels (on a Retina display exactly, 0.5 pt inside each edge of a Standard 6-pt bar and 1.5 pt inside a Thick 8-pt one;
-// at 1x half a point to the left), in the menu bar's text colour at 0.9 opacity. The app asks for none at the Thin width
+// at 1x half a point to the left), in the menu bar's text colour at 0.9 opacity. The app draws them at its fixed width 3, never at 1
 static void _render_letters(CGContextRef ctx, bool light, CGFloat tickWidth, CGFloat tickTotalWidth, unsigned shown, CGFloat imageWidth, int split, natural_t cores, int extraCount, const CpuExtraReading* extra)
 {
   const CGFloat scale = _device_scale(ctx);
@@ -1086,16 +1086,5 @@ void CpuRender(CpuSummaryInfo* cpu_info, CGContextRef ctx, bool light, int granu
   if (letters)
   {
     CGContextRestoreGState(ctx);
-  }
-}
-
-void CpuRenderDemo(CGContextRef ctx, CGFloat width, CGFloat height, int tint)
-{
-  CGContextClearRect(ctx, CGRectMake(0, 0, width, height));
-  for (natural_t y=0; y<height; y++)
-  {
-    rgb rgb = _color(tint, (CGFloat)y/height);
-    CGContextSetRGBFillColor(ctx, rgb.r, rgb.g, rgb.b, 1);
-    CGContextFillRect(ctx, CGRectMake(0, y, width, 1));
   }
 }

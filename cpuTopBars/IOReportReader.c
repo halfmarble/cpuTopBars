@@ -261,12 +261,17 @@ static bool IOReportSetUp(void)
     {
       CFRelease(subbed);
     }
+    if (sub != NULL)
+    {
+      CFRelease(sub);
+    }
     return false;
   }
   CFDictionaryRef first = pCreateSamples(sub, subbed, NULL);
   if (first == NULL)
   {
     CFRelease(subbed);
+    CFRelease(sub);
     return false;
   }
   subscription = sub;

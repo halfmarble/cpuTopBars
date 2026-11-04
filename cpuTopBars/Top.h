@@ -74,7 +74,6 @@ int TopSample(void);
 const TopProcessSample_t* TopIterate(void);
 // Starts the next TopIterate walk at the first process again.
 void TopIterateReset(void);
-const char* TopGetUsername(uid_t a_uid);
 TopProcessInfo_t* TopGetArgs(pid_t pid);
 TopProcessSample_t* TopGetSample(pid_t pid);
 // The number of other users' processes in the latest sample whose CPU is unknown (cpu_known 0).

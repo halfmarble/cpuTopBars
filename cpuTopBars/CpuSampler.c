@@ -44,31 +44,6 @@ static host_basic_info_t _CpuSamplerGetCounts(void)
       mach_error("host_info error:", error);
       memset(&basic_info, 0x0, sizeof(host_basic_info_data_t));
     }
-    else
-    {
-//      struct host_basic_info {
-//        integer_t               max_cpus;               /* max number of CPUs possible */
-//        integer_t               avail_cpus;             /* number of CPUs now available */
-//        natural_t               memory_size;            /* size of memory in bytes, capped at 2 GB */
-//        cpu_type_t              cpu_type;               /* cpu type */
-//        cpu_subtype_t           cpu_subtype;            /* cpu subtype */
-//        cpu_threadtype_t        cpu_threadtype;         /* cpu threadtype */
-//        integer_t               physical_cpu;           /* number of physical CPUs now available */
-//        integer_t               physical_cpu_max;       /* max number of physical CPUs possible */
-//        integer_t               logical_cpu;            /* number of logical cpu now available */
-//        integer_t               logical_cpu_max;        /* max number of physical CPUs possible */
-//        uint64_t                max_mem;                /* actual size of physical memory */
-//      };
-//    max_cpus: 8
-//    avail_cpus: 8
-//    physical_cpu: 4
-//    physical_cpu_max: 4
-//    logical_cpu: 8
-//    logical_cpu_max: 8
-//
-//      cpu_type: x86_64h
-//      cpu_subtype: Intel x86-64h Haswell
-    }
   }
   return &basic_info;
 }

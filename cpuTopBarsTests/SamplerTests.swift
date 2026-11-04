@@ -32,10 +32,10 @@ extension FreeTests {
       defer { free(flat.now) }
       let n = Int(flat.countLogical)
       #expect(n >= 1)
-      // every CPU gets the same load (CpuSampler.c:272)
+      // every CPU gets the same load
       let first = flat.now[0].load
       #expect((0..<n).allSatisfy { flat.now[$0].load == first })
-      // each call stores the static load, then raises it by 0.04 * speed, back to 0 past 1 (CpuSampler.c:274-280): the
+      // each call stores the static load, then raises it by 0.04 * speed, back to 0 past 1: the
       // next call stores the raised value, or 0 after the wrap
       CpuSamplerFlatDemoUpdate(&flat, 1.0)
       let second = flat.now[0].load
@@ -43,19 +43,29 @@ extension FreeTests {
     }
 
     @Test func sineDemo() throws {
-      // Only this test calls the sine demo, so its static counter (CpuSampler.c:247) starts at 0: CPU 0 gets
-      // sin(3.5 * 0) / 2 + 0.5 = 0.5, and the counter then rises by 0.025 (CpuSampler.c:250-251), so CPU 1 gets
-      // sin(3.5 * 0.025) / 2 + 0.5
+      // The demo's counter is static and shared, so the first CPU's phase depends on what ran before. What holds from
+      // any starting phase: every load is in 0...1, and each CPU's phase is one step (3.5 * 0.025) past the one before,
+      // so sin(a + d) = sin(a) cos(d) +- cos(a) sin(d), the sign of cos(a) being unknown from the load alone
       var sine = CpuSummaryInfo()
       CpuSamplerSineDemoInit(&sine)
       defer { free(sine.now) }
       try #require(sine.countLogical >= 2)
-      #expect(sine.now[0].load == 0.5)
-      #expect(abs(sine.now[1].load - (sin(3.5 * 0.025) / 2 + 0.5)) < 1e-12)
+      let step = 3.5 * 0.025
+      for i in 0..<Int(sine.countLogical) {
+        #expect(sine.now[i].load >= 0.0 && sine.now[i].load <= 1.0)
+      }
+      for i in 0..<Int(sine.countLogical) - 1 {
+        let s0 = (Double(sine.now[i].load) - 0.5) * 2.0
+        let s1 = (Double(sine.now[i + 1].load) - 0.5) * 2.0
+        let c0 = (max(0.0, 1.0 - s0 * s0)).squareRoot()
+        let plus = s0 * cos(step) + c0 * sin(step)
+        let minus = s0 * cos(step) - c0 * sin(step)
+        #expect(abs(s1 - plus) < 1e-6 || abs(s1 - minus) < 1e-6)
+      }
     }
 
     @Test func countsByGranularity() {
-      // CpuSamplerGetCount (CpuSampler.c:122): 1 for granularity 0, the physical count for 1 and the logical count for 2,
+      // CpuSamplerGetCount: 1 for granularity 0, the physical count for 1 and the logical count for 2,
       // each at least 1, and a Mac has no fewer logical CPUs than physical ones
       #expect(CpuSamplerGetCount(0) == 1)
       #expect(CpuSamplerGetCount(1) >= 1)
@@ -63,7 +73,7 @@ extension FreeTests {
     }
 
     @Test func realReadStaysInRange() {
-      // CpuSamplerInit reads once and calls CpuSamplerUpdate (CpuSampler.c:151), which stores used / total (CpuSampler.c:175),
+      // CpuSamplerInit reads once and calls CpuSamplerUpdate, which stores used / total,
       // a share between 0 and 1
       var info = CpuSummaryInfo()
       CpuSamplerInit(&info)

@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
 #include <limits.h>
@@ -28,7 +29,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <libproc.h>
-#include <pwd.h>
 
 #include <sys/param.h>
 #include <sys/sysctl.h>
@@ -41,23 +41,8 @@
 #include <mach/mach_types.h>
 #include <mach/mach_time.h>
 
-#include <CoreFoundation/CoreFoundation.h>
-
 #include "Top.h"
 #include "rb.h"
-
-#define TIME_VALUE_TO_TIMEVAL(a, r) do { \
-  (r)->tv_sec = (a)->seconds;             \
-  (r)->tv_usec = (a)->microseconds;       \
-} while (0)
-
-#define TIME_VALUE_TO_NS(a) \
-    (((uint64_t)((a)->seconds) * NSEC_PER_SEC) + \
-    ((uint64_t)((a)->microseconds) * NSEC_PER_USEC))
-
-#define NS_TO_TIMEVAL(NS) \
-    (struct timeval){ .tv_sec = (NS) / NSEC_PER_SEC, \
-    .tv_usec = ((NS) % NSEC_PER_SEC) / NSEC_PER_USEC, }
 
 typedef struct _TopProcessInfo _TopProcessInfo_t;
 struct _TopProcessInfo
@@ -77,13 +62,10 @@ static uint64_t _top_prev_timens;
 static uint64_t _top_prev_wall_us;
 static mach_timebase_info_data_t _top_timebase;
 
-/* Buffer that is large enough to hold the entire argument area of a process. */
+// One buffer, kern.argmax bytes: the most KERN_PROCARGS2 returns for a process (see TopInit).
 static char *_top_arg_buffer;
 static int _top_arg_max;
 
-/* Cache of uid->username translations. */
-static CFMutableDictionaryRef _top_username_hash_table;
-//static CFMutableDictionaryRef _top_hash_table;
 
 /* Other users' processes of the latest sample whose CPU could not be read (TopUnreadableCount). */
 static int _top_unreadable_count;
@@ -93,21 +75,6 @@ static rb_tree(_TopProcessInfo_t) _top_sorted_tree;
 static boolean_t _top_is_sorted;
 static TopOrder _top_order = TopOrderCpu;
 static _TopProcessInfo_t* _top_iterator;
-
-static void simpleFree(CFAllocatorRef allocator, const void *value)
-{
-  free((void *)value);
-}
-
-static const void* stringRetain(CFAllocatorRef allocator, const void *value)
-{
-  return strdup(value);
-}
-
-static Boolean stringEqual(const void *value1, const void *value2)
-{
-  return strcmp(value1, value2) == 0;
-}
 
 static int _top_compare_pid_func(const _TopProcessInfo_t *a, const _TopProcessInfo_t *b)
 {
@@ -132,64 +99,28 @@ static int _top_compare_mem_func(const _TopProcessInfo_t *a, const _TopProcessIn
   return 0;
 }
 
-static void _top_insert(_TopProcessInfo_t *pinfo)
+// The process with this pid in the pid tree, or NULL.
+static _TopProcessInfo_t* _top_find(pid_t pid)
 {
-  rb_node_new(&_top_pid_tree, pinfo, node_new);
-  rb_insert(&_top_pid_tree, pinfo, _top_compare_pid_func, _TopProcessInfo_t, node_new);
-}
-
-static void _top_remove(_TopProcessInfo_t *pinfo)
-{
-  rb_remove(&_top_pid_tree, pinfo, _TopProcessInfo_t, node_new);
-}
-
-static _TopProcessInfo_t* _top_search(pid_t pid)
-{
-  _TopProcessInfo_t* retval, key;
-
-  key.sample.pid = pid;
-  rb_search(&_top_pid_tree, &key, _top_compare_pid_func, node_new, retval);
-  if (retval == rb_tree_nil(&_top_pid_tree))
-  {
-    retval = NULL;
-  }
-  return retval;
+  _TopProcessInfo_t probe;
+  _TopProcessInfo_t* found;
+  probe.sample.pid = pid;
+  rb_search(&_top_pid_tree, &probe, _top_compare_pid_func, node_new, found);
+  return (found == rb_tree_nil(&_top_pid_tree)) ? NULL : found;
 }
 
 TopProcessSample_t* TopGetSample(pid_t pid)
 {
-  struct _TopProcessInfo *info = _top_search(pid);
-  if (info != NULL)
-  {
-    return &info->sample;
-  }
-  else
-  {
-    return NULL;
-  }
+  _TopProcessInfo_t* info = _top_find(pid);
+  return (info != NULL) ? &info->sample : NULL;
 }
 
+// Takes a process out of the pid tree and frees it. Its place in the sorted tree is not touched: only TopSort
+// destroys, and it rebuilds that tree.
 static void _top_destroy(_TopProcessInfo_t *pinfo)
 {
-  _top_remove(pinfo);
+  rb_remove(&_top_pid_tree, pinfo, _TopProcessInfo_t, node_new);
   free(pinfo);
-}
-
-static int __attribute__((noinline)) _top_kinfo_for_pid(struct kinfo_proc* kinfo, pid_t pid)
-{
-  size_t miblen = 4;
-  int mib[miblen];
-  mib[0] = CTL_KERN;
-  mib[1] = KERN_PROC;
-  mib[2] = KERN_PROC_PID;
-  mib[3] = pid;
-  size_t len = sizeof(struct kinfo_proc);
-  // for a pid that has already exited, sysctl succeeds but returns no data (len 0)
-  if ((sysctl(mib, (u_int)miblen, kinfo, &len, NULL, 0) != 0) || (len != sizeof(struct kinfo_proc)))
-  {
-    return (-1);
-  }
-  return (0);
 }
 
 // The physical footprint of a process, 1 when read. The task name port is what the App Sandbox allows for
@@ -231,7 +162,7 @@ static int __attribute__((noinline)) _top_update_for_pid(pid_t pid)
     return (-3);
   }
   
-  _TopProcessInfo_t* pinfo = _top_search((pid_t)pid);
+  _TopProcessInfo_t* pinfo = _top_find(pid);
   if (pinfo == NULL)
   {
     pinfo = (_TopProcessInfo_t *)calloc(1, sizeof(_TopProcessInfo_t));
@@ -239,8 +170,9 @@ static int __attribute__((noinline)) _top_update_for_pid(pid_t pid)
     {
       return (-1);
     }
-    pinfo->sample.pid = (pid_t)pid;
-    _top_insert(pinfo);
+    pinfo->sample.pid = pid;
+    rb_node_new(&_top_pid_tree, pinfo, node_new);
+    rb_insert(&_top_pid_tree, pinfo, _top_compare_pid_func, _TopProcessInfo_t, node_new);
   }
   TopProcessSample_t* sample = &pinfo->sample;
   
@@ -329,65 +261,57 @@ int TopInit(void)
   
   _top_sequence = 0;
 
+  // kern.argmax is the most bytes KERN_PROCARGS2 can return for one process; one buffer of that size is reused for
+  // every read. Without the value or the buffer TopGetArgs reads no arguments, and sampling still works.
+  int argmax_name[2] = { CTL_KERN, KERN_ARGMAX };
+  size_t argmax_size = sizeof(_top_arg_max);
+  if ((sysctl(argmax_name, 2, &_top_arg_max, &argmax_size, NULL, 0) == -1) || (_top_arg_max <= 0))
   {
-    int  mib[2];
-    mib[0] = CTL_KERN;
-    mib[1] = KERN_ARGMAX;
-
-    // without kern.argmax or the buffer TopGetArgs reads no arguments; the tree and the table below are still set up
-    size_t size = sizeof(_top_arg_max);
-    if ((sysctl(mib, 2, &_top_arg_max, &size, NULL, 0) == -1) || (_top_arg_max <= 0))
-    {
-      _top_arg_max = 0;
-    }
-    _top_arg_buffer = (_top_arg_max > 0) ? (char *)malloc(_top_arg_max) : NULL;
+    _top_arg_max = 0;
   }
-  
+  _top_arg_buffer = (_top_arg_max > 0) ? (char *)malloc(_top_arg_max) : NULL;
+
   rb_tree_new(&_top_pid_tree, node_new);
 
-  CFDictionaryValueCallBacks tableCallbacks = { 0, stringRetain, simpleFree, NULL, stringEqual };
-  _top_username_hash_table = CFDictionaryCreateMutable(NULL, 0, NULL, &tableCallbacks);
-
-//  CFDictionaryValueCallBacks table2Callbacks = { 0, NULL, simpleFree, NULL, NULL };
-//  _top_hash_table = CFDictionaryCreateMutable(NULL, 0, NULL, &table2Callbacks);
-  
   memset(&_top_process_info, 0, sizeof(TopProcessInfo_t));
 
   return TopSample();
 }
 
-void TopSort(void)
+// Builds the sorted tree from the processes the latest sample saw, counts them and the unreadable ones, and frees
+// the processes that were not seen. The pid tree is walked with the next node read first, since a stale one is freed.
+static void TopSort(void)
 {
-  _TopProcessInfo_t  *pinfo, *ppinfo;
-  
+  int (*before)(const _TopProcessInfo_t*, const _TopProcessInfo_t*) =
+    (_top_order == TopOrderMemory) ? _top_compare_mem_func : _top_compare_cpu_func;
+
   _top_iterator = NULL;
-  
   _top_is_sorted = 1;
-    
   _top_process_count = 0;
   _top_unreadable_count = 0;
-  
   rb_tree_new(&_top_sorted_tree, node_sorted);
-  rb_first(&_top_pid_tree, node_new, pinfo);
-  for (; pinfo != rb_tree_nil(&_top_pid_tree); pinfo = ppinfo)
+
+  _TopProcessInfo_t* node;
+  rb_first(&_top_pid_tree, node_new, node);
+  while (node != rb_tree_nil(&_top_pid_tree))
   {
-    rb_next(&_top_pid_tree, pinfo, _TopProcessInfo_t, node_new, ppinfo);
-    
-    if (pinfo->sample.sequence == _top_sequence)
+    _TopProcessInfo_t* following;
+    rb_next(&_top_pid_tree, node, _TopProcessInfo_t, node_new, following);
+    if (node->sample.sequence != _top_sequence)
     {
-      rb_node_new(&_top_sorted_tree, pinfo, node_sorted);
-      rb_insert(&_top_sorted_tree, pinfo, (_top_order == TopOrderMemory) ? _top_compare_mem_func : _top_compare_cpu_func, _TopProcessInfo_t, node_sorted);
-      
+      _top_destroy(node);
+    }
+    else
+    {
+      rb_node_new(&_top_sorted_tree, node, node_sorted);
+      rb_insert(&_top_sorted_tree, node, before, _TopProcessInfo_t, node_sorted);
       _top_process_count++;
-      if ((pinfo->sample.cpu_known == 0) && (pinfo->sample.uid != getuid()))
+      if ((node->sample.cpu_known == 0) && (node->sample.uid != getuid()))
       {
         _top_unreadable_count++;
       }
     }
-    else
-    {
-      _top_destroy(pinfo);
-    }
+    node = following;
   }
 }
 
@@ -496,61 +420,24 @@ int TopSample(void)
   return _top_process_count;
 }
 
+// Walks the sorted tree; before the first sort there is nothing to walk. The walk ends with NULL and the next
+// call starts again at the first process.
 const TopProcessSample_t* TopIterate(void)
 {
-  if (_top_is_sorted)
+  if (!_top_is_sorted)
   {
-    if (_top_iterator == NULL)
-    {
-      rb_first(&_top_sorted_tree, node_sorted, _top_iterator);
-    }
-    else
-    {
-      rb_next(&_top_sorted_tree, _top_iterator, _TopProcessInfo_t, node_sorted, _top_iterator);
-    }
-    if (_top_iterator == rb_tree_nil(&_top_sorted_tree))
-    {
-      _top_iterator = NULL;
-    }
+    return NULL;
+  }
+  _TopProcessInfo_t* node = _top_iterator;
+  if (node == NULL)
+  {
+    rb_first(&_top_sorted_tree, node_sorted, node);
   }
   else
   {
-    boolean_t dead;
-
-    if (_top_iterator == NULL)
-    {
-      rb_first(&_top_pid_tree, node_new, _top_iterator);
-    }
-    else
-    {
-      rb_next(&_top_pid_tree, _top_iterator, _TopProcessInfo_t, node_new, _top_iterator);
-    }
-
-    do
-    {
-      dead = FALSE;
-      
-      if (_top_iterator == rb_tree_nil(&_top_pid_tree))
-      {
-        _top_iterator = NULL;
-        break;
-      }
-      
-      if (_top_iterator->sample.sequence != _top_sequence)
-      {
-        _TopProcessInfo_t  *pinfo;
-        
-        pinfo = _top_iterator;
-        rb_next(&_top_pid_tree, _top_iterator, _TopProcessInfo_t, node_new, _top_iterator);
-        
-        _top_destroy(pinfo);
-        
-        dead = TRUE;
-      }
-    }
-    while (dead);
+    rb_next(&_top_sorted_tree, node, _TopProcessInfo_t, node_sorted, node);
   }
-
+  _top_iterator = (node == rb_tree_nil(&_top_sorted_tree)) ? NULL : node;
   return (_top_iterator != NULL) ? &_top_iterator->sample : NULL;
 }
 
@@ -558,64 +445,6 @@ void TopIterateReset(void)
 {
   _top_iterator = NULL;
 }
-
-const char* TopGetUsername(uid_t uid)
-{
-  const void* k = (const void *)(uintptr_t)uid;
-  
-  if (!CFDictionaryContainsKey(_top_username_hash_table, k))
-  {
-    struct passwd *pwd = getpwuid(uid);
-    if (pwd == NULL)
-      return NULL;
-    CFDictionarySetValue(_top_username_hash_table, k, pwd->pw_name);
-  }
-  return CFDictionaryGetValue(_top_username_hash_table, k);
-}
-
-//#define DEBUG_ARGS
-#ifdef DEBUG_ARGS
-static inline void _spewraw(char *ptr, unsigned long left)
-{
-  fprintf(stderr, ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
-  for (int i=0; i<left; i++)
-  {
-    if (isprint(ptr[i]))
-    {
-      fprintf(stderr, "%c", ptr[i]);
-    }
-    else
-    {
-      fprintf(stderr, "[%x]", ptr[i]);
-    }
-  }
-  fprintf(stderr, "\n<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n\n\n");
-}
-static inline void _spewbytes(char *ptr, unsigned long left)
-{
-  fprintf(stderr, ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
-  for (int i=0; i<left; i++)
-  {
-    if (ptr[i] == 0)
-    {
-      fprintf(stderr, "\'\\0\'");
-    }
-    else if (ptr[i] == '\n')
-    {
-      fprintf(stderr, "\n");
-    }
-    else if (isprint(ptr[i]))
-    {
-      fprintf(stderr, "%c", ptr[i]);
-    }
-    else
-    {
-      fprintf(stderr, "[%x]", ptr[i]);
-    }
-  }
-  fprintf(stderr, "\n<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n\n\n");
-}
-#endif
 
 // The next NUL-terminated string at *data, before end; NULL when none is left or it has no NUL before end
 // (a process can overwrite its own string area and leave none).
@@ -681,13 +510,6 @@ TopProcessInfo_t* TopGetArgs(pid_t pid)
   size_t size = _top_arg_max;
   if ((_top_arg_buffer != NULL) && (sysctl(mib, 3, _top_arg_buffer, &size, NULL, 0) == 0) && (size >= sizeof(int)))
   {
-#ifdef DEBUG_ARGS
-    fprintf(stderr, "\n");
-    fprintf(stderr, "\n");
-    _spewraw(_top_arg_buffer, size);
-    fprintf(stderr, "\n");
-    fprintf(stderr, "\n");
-#endif
     // argc; the executable's path and its NUL padding; argc arguments; the environment up to the first empty
     // string; then empty strings and the kernel's own apple[] strings (ptr_munge=, executable_cdhash= ...),
     // which are not environment. Every string is read up to end, never with strlen.
@@ -697,9 +519,6 @@ TopProcessInfo_t* TopGetArgs(pid_t pid)
     memcpy(&argc, data, sizeof(int));
     data += sizeof(int);
     _top_process_info.args_count = (argc > 0) ? argc : 0;
-#ifdef DEBUG_ARGS
-    fprintf(stderr, "   args_count: %d\n", _top_process_info.args_count);
-#endif
 
     size_t length = 0;
     char* string = _top_next_string(&data, end, &length);
@@ -712,9 +531,6 @@ TopProcessInfo_t* TopGetArgs(pid_t pid)
         command[length] = '\0';
         _top_process_info.command = command;
       }
-#ifdef DEBUG_ARGS
-      fprintf(stderr, "   args_command: %s\n", _top_process_info.command);
-#endif
 
       // the padding after the path
       while ((data < end) && (data[0] == '\0'))
@@ -732,12 +548,6 @@ TopProcessInfo_t* TopGetArgs(pid_t pid)
         }
         index++;
       }
-#ifdef DEBUG_ARGS
-      fprintf(stderr, "---- args_length: [%d]\n", _top_process_info.args_length);
-      fprintf(stderr, "---- args_count: [%d]\n", _top_process_info.args_count);
-      _spewbytes(_top_process_info.args_info, _top_process_info.args_length);
-      fprintf(stderr, "\n");
-#endif
 
       // the environment, only when every argument was found
       if (index == _top_process_info.args_count)
@@ -750,28 +560,27 @@ TopProcessInfo_t* TopGetArgs(pid_t pid)
           }
           _top_process_info.envs_count++;
         }
-#ifdef DEBUG_ARGS
-        fprintf(stderr, "---- envs_length: [%d]\n", _top_process_info.envs_length);
-        fprintf(stderr, "---- envs_count: [%d]\n", _top_process_info.envs_count);
-        _spewbytes(_top_process_info.envs_info, _top_process_info.envs_length);
-#endif
       }
     }
   }
   
-  struct kinfo_proc kinfo;
-  int res = _top_kinfo_for_pid(&kinfo, pid);
-  if (res != 0)
+  // the name the latest sample read (up to 32 characters for the user's own processes, 16 for the others); a process
+  // started since that sample is read directly, by the 16-character name every process gives
+  const char* found = NULL;
+  size_t name_length = 0;
+  struct proc_bsdshortinfo shortinfo;
+  TopProcessSample_t* sample = TopGetSample(pid);
+  if (sample != NULL)
   {
-    if (_top_process_info.name != NULL)
-    {
-      _top_process_info.name[0] = '\0';
-    }
-    fprintf(stderr, "ERR kinfo_for_pid\n");
-    return &_top_process_info;
+    found = sample->name;
+    name_length = strnlen(sample->name, sizeof(sample->name));
   }
-  size = strnlen(kinfo.kp_proc.p_comm, sizeof(kinfo.kp_proc.p_comm));
-  char* name = realloc(_top_process_info.name, size+1);
+  else if (proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0, &shortinfo, PROC_PIDT_SHORTBSDINFO_SIZE) == PROC_PIDT_SHORTBSDINFO_SIZE)
+  {
+    found = shortinfo.pbsi_comm;
+    name_length = strnlen(shortinfo.pbsi_comm, sizeof(shortinfo.pbsi_comm));
+  }
+  char* name = (name_length > 0) ? realloc(_top_process_info.name, name_length + 1) : NULL;
   if (name == NULL)
   {
     if (_top_process_info.name != NULL)
@@ -780,36 +589,11 @@ TopProcessInfo_t* TopGetArgs(pid_t pid)
     }
     return &_top_process_info;
   }
-  memcpy(name, kinfo.kp_proc.p_comm, size);
-  name[size] = '\0';
+  memcpy(name, found, name_length);
+  name[name_length] = '\0';
   _top_process_info.name = name;
-  
   return &_top_process_info;
 }
-
-//void top_fini(void)
-//{
-//  top_pinfo_t *pinfo, *ppinfo;
-//
-//  /* Deallocate the arg string. */
-//  free(top_arg);
-//
-//  /* Clean up the oinfo structures. */
-//  CFRelease(top_oinfo_hash);
-//
-//  /* Clean up the pinfo structures. */
-//  rb_first(&top_ptree, pnode, pinfo);
-//  for (; pinfo != rb_tree_nil(&top_ptree); pinfo = ppinfo)
-//  {
-//    rb_next(&top_ptree, pinfo, top_pinfo_t, pnode, ppinfo);
-//
-//    /* This removes the pinfo from the tree, and frees pinfo and its data. */
-//    top_p_destroy_pinfo(pinfo);
-//  }
-//
-//  /* Clean up the uid->username translation cache. */
-//  CFRelease(top_uhash);
-//}
 
 // Reads the digits of one number (an optional fraction when allowed) and moves *s past it; false when none.
 static bool ParseTopNumber(const char **s, double *value, bool *has_fraction)

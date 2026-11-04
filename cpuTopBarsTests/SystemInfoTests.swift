@@ -32,8 +32,8 @@ private func bufferString(_ buffer: [CChar]) -> String {
 extension FreeTests {
   @Suite struct SystemInfoTests {
     @Test func noSamplesGiveNoReading() {
-      // SystemInfoCpuReset forgets the samples (SystemInfo.c:131); with fewer than 2 the busy share is -1, the span 0
-      // and both kinds' shares -1 (SystemInfo.c:162-177)
+      // SystemInfoCpuReset forgets the samples; with fewer than 2 the busy share is -1, the span 0
+      // and both kinds' shares -1
       SystemInfoCpuReset()
       var span = 1.0, efficiency = 0.0, performance = 0.0
       #expect(SystemInfoCpuBusy(&span, &efficiency, &performance) == -1)
@@ -45,22 +45,22 @@ extension FreeTests {
     }
 
     @Test func memorySwapAndUptime() {
-      // SystemInfoMemory: total is hw.memsize (SystemInfo.c:224, 242), used the counted pages, which cannot exceed it
+      // SystemInfoMemory: total is hw.memsize, used the counted pages, which cannot exceed it
       var used: UInt64 = 0, total: UInt64 = 0
       #expect(SystemInfoMemory(&used, &total))
       #expect(total == ProcessInfo.processInfo.physicalMemory)
       #expect(used > 0 && used <= total)
-      // SystemInfoSwap reads vm.swapusage (SystemInfo.c:250)
+      // SystemInfoSwap reads vm.swapusage
       var swap: UInt64 = 0
       #expect(SystemInfoSwap(&swap))
-      // SystemInfoUptimeSeconds counts from the boot time, sleep included (SystemInfo.c:269), so it is not below the
+      // SystemInfoUptimeSeconds counts from the boot time, sleep included, so it is not below the
       // system uptime, which leaves sleep out; one second of slack for the two clocks' reads
       #expect(SystemInfoUptimeSeconds() >= Int(ProcessInfo.processInfo.systemUptime) - 1)
     }
 
     @Test func busyOverOneSecond() {
-      // two ticks 1.1 s apart: the window is the 2 samples, whose span is their time difference, at least 1.1 s
-      // (SystemInfo.c:185-200), and the busy share is used / total, between 0 and 1 (SystemInfo.c:126-128)
+      // two ticks 1.1 s apart: the window is the 2 samples, whose span is their time difference, at least 1.1 s,
+      // and the busy share is used / total, between 0 and 1
       SystemInfoCpuReset()
       SystemInfoCpuTick()
       let until = Date().addingTimeInterval(1.1)

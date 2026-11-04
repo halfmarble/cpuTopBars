@@ -2742,8 +2742,5 @@
     <resources>
         <image name="NSRevealFreestandingTemplate" width="15" height="15"/>
         <image name="NSStatusNone" width="16" height="16"/>
-        <image name="blue" width="128" height="512"/>
-        <image name="green" width="128" height="512"/>
-        <image name="yellow" width="128" height="512"/>
     </resources>
 </document>

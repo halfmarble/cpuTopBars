@@ -27,7 +27,7 @@ import Foundation
 // finds the runner's own process in the latest sample.
 extension FreeTests {
   @Suite struct TopTests {
-    // TopInit allocates its tables and takes the first sample (Top.c:321-355): once per process
+    // TopInit allocates its tables and takes the first sample (TopInit): once per process
     static let processCount = TopInit()
 
     private static func sample() -> Int32 {
@@ -37,12 +37,12 @@ extension FreeTests {
 
     @Test func findsItself() {
       #expect(TopTests.processCount > 0)
-      // a second sample after some CPU use, so the runner has a baseline (Top.c:272-298)
+      // a second sample after some CPU use, so the runner has a baseline (_top_update_for_pid)
       let until = Date().addingTimeInterval(0.2)
       var spin = 0.0
       while Date() < until { spin += 1 }
       #expect(TopTests.sample() > 0, "after \(spin) loops")
-      // own process: the full read works (Top.c:255), so CPU and memory are known and the footprint is above 0
+      // own process: the full read works (_top_update_for_pid), so CPU and memory are known and the footprint is above 0
       let me = TopGetSample(getpid())
       #expect(me != nil)
       #expect(me?.pointee.cpu_known == 1)
@@ -51,7 +51,7 @@ extension FreeTests {
     }
 
     @Test func memoryOrderIsNonIncreasing() {
-      // _top_compare_mem_func (Top.c:126): known memory first, then the larger footprint first
+      // _top_compare_mem_func: known memory first, then the larger footprint first
       _ = TopTests.sample()
       TopSetOrder(TopOrderMemory)
       defer { TopSetOrder(TopOrderCpu) }
@@ -68,7 +68,7 @@ extension FreeTests {
     }
 
     @Test func iterateResetStartsTheWalkAgain() {
-      // TopIterateReset (Top.c): after a walk that stopped part way, the next TopIterate starts at the first process
+      // TopIterateReset: after a walk that stopped part way, the next TopIterate starts at the first process
       _ = TopTests.sample()
       TopIterateReset()
       let first = TopIterate()?.pointee.pid
@@ -80,13 +80,11 @@ extension FreeTests {
       TopIterateReset()
     }
 
-    @Test func argumentsAndUserName() {
+    @Test func arguments() {
       _ = TopTests.sample()
-      // TopGetArgs (Top.c:651) reads KERN_PROCARGS2 of the runner's own process: argc is at least 1 (Top.c:693)
+      // TopGetArgs reads KERN_PROCARGS2 of the runner's own process: argc is at least 1
       let args = TopGetArgs(getpid())
       #expect((args?.pointee.args_count ?? 0) >= 1)
-      // TopGetUsername (Top.c:556) is getpwuid's pw_name
-      #expect(String(cString: TopGetUsername(getuid())) == NSUserName())
     }
 
     // TopParseTopLine over three recordings of `top -l 2 -stats pid,cpu` (or pid,uid,cpu,command) on macOS 27 (in the
@@ -151,8 +149,8 @@ extension FreeTests {
 
     // Run as root, the test is skipped, not passed: root reads every process
     @Test(.disabled(if: getuid() == 0, "root reads every process")) func otherUsersProcessIsUnreadable() {
-      // Process 1 (launchd) belongs to root. A user who is not root gets no task info for it (Top.c:255-259), so its CPU
-      // is unknown and it counts as unreadable (Top.c:381); the sample still lists it
+      // Process 1 (launchd) belongs to root. A user who is not root gets no task info for it (_top_update_for_pid), so its CPU
+      // is unknown and it counts as unreadable (TopSort); the sample still lists it
       _ = TopTests.sample()
       let launchd = TopGetSample(1)
       #expect(launchd != nil)

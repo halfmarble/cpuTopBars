@@ -25,7 +25,7 @@ import CoreGraphics
 import Foundation
 
 // CpuRender into a bitmap, dark menu bar, no colour, tickWidth 4 and tickTotalWidth 6. Granularity 0 is one core bar on
-// any Mac (CpuSampler.c:130), so the readings block starts the image: the disk bar is at x = 0 to 8 (CpuRenderer.c:295,
+// any Mac, so the readings block starts the image: the disk bar is at x = 0 to 8 (CpuRenderReadingX,
 // 2 * tickWidth wide). The bitmap's first memory row is the image's top, so the row at height y is memory row 15 - y.
 private struct Bitmap {
   let width: Int
@@ -76,7 +76,7 @@ extension FreeTests {
   @Suite struct RendererDrawingTests {
     @Test(arguments: [(0.0, 0), (0.25, 4), (0.5, 8), (1.0, 16)])
     func barHeight(load: Double, rows: Int) {
-      // _render_group (CpuRenderer.c:395): a background over the whole 16 pt, then a fill load*16 pt high from the bottom.
+      // _render_group: a background over the whole 16 pt, then a fill load*16 pt high from the bottom.
       // On a dark bar the background has alpha 0.3 (about 76) and the fill over it at least 0.606 (about 154) at load 0.25,
       // so "above 127" counts the filled rows only
       let column = render(bar: true, stripped: false, width: 60, readings: readings(disk: load)).column(1)
@@ -86,8 +86,8 @@ extension FreeTests {
     }
 
     @Test func dashes() {
-      // stripped: the bar starts at DASHED_BOTTOM 2 (CpuRenderer.c:545), so heights 0 and 1 are clear, and heights 4, 7,
-      // 10 and 13 are cleared again (CpuRenderer.c:637), leaving five 2-pt dashes
+      // stripped: the bar starts at DASHED_BOTTOM 2, so heights 0 and 1 are clear, and heights 4, 7,
+      // 10 and 13 are cleared again, leaving five 2-pt dashes
       let column = render(bar: true, stripped: true, width: 60, readings: readings(disk: 1.0)).column(1)
       for y in [0, 1, 4, 7, 10, 13] { #expect(column[y] == 0, "height \(y)") }
       for y in [2, 3, 5, 6, 8, 9, 11, 12, 14, 15] { #expect(column[y] > 127, "height \(y)") }
@@ -109,7 +109,7 @@ extension FreeTests {
     }
 
     @Test func unreadReadingsDrawNothingInDotStyle() {
-      // Dot style, every reading below 0: the branch for a reading not read draws only in bar style (CpuRenderer.c:600),
+      // Dot style, every reading below 0: the branch for a reading not read draws only in bar style,
       // so the disk slot, x = 0 to 6 (the dot slot is tickTotalWidth), stays transparent. The one core dot starts at
       // x = 35 (CpuRenderReadingsWidth, dot), clear of that slot
       let image = render(bar: false, stripped: false, width: 60, readings: readings(disk: -1))
@@ -119,8 +119,8 @@ extension FreeTests {
     @Test(arguments: [(Int32(1), true), (Int32(0), false)])
     func neuralEngineWideSolidBar(state: Int32, on: Bool) {
       // gpuShown, dashed: the memory bar (not read: its background only) at x = 10 to 18, the gap after memory (x = 18 to 24),
-      // the Neural Engine's bar at x = 24 to 32 (index 2), the GPU's (its background only) at 34 to 42, 2 * tickWidth wide (CpuRenderReadingX, CpuRenderer.c), drawn last from DASHED_BOTTOM 2 and
-      // whole, without the dashes (_render_neural_engine, CpuRenderer.c:498): on, white at 0.9 opacity (alpha about 230,
+      // the Neural Engine's bar at x = 24 to 32 (index 2), the GPU's (its background only) at 34 to 42, 2 * tickWidth wide (CpuRenderReadingX), drawn last from DASHED_BOTTOM 2 and
+      // whole, without the dashes (_render_neural_engine): on, white at 0.9 opacity (alpha about 230,
       // and red equal to alpha, as premultiplied white); off, the background alone, alpha 0.3 (about 76). The 2-pt gaps
       // before it (x = 18 to 23) and after it (x = 32, 33) stay clear
       var r = readings(disk: -1)
@@ -545,9 +545,9 @@ extension FreeTests {
     }
 
     @Test func extraReadingMarkDrawsOneRow() {
-      // one extra reading, value 0.5 and mark 0.5, in a 100-wide image: its x is 100 - _extra_width (4 + 10) + 4 = 90
-      // (CpuRenderer.c:317), its bar 2 * tickWidth = 8 wide. The mark is a 1-pt white line at
-      // floor(bottom + 0.5 * 16) = 8 (CpuRenderer.c:676), drawn last so it is opaque
+      // one extra reading, value 0.5 and mark 0.5, in a 100-wide image: its x is 100 - _extra_width (4 + 10) + 4 = 90,
+      // its bar 2 * tickWidth = 8 wide. The mark is a 1-pt white line at
+      // floor(bottom + 0.5 * 16) = 8, drawn last so it is opaque
       var extra = CpuExtraReading()
       extra.value = 0.5
       extra.mark = 0.5
@@ -635,7 +635,7 @@ extension FreeTests {
       // read: its background, and its B) at 0 to 6 pt, Wi-Fi's at 7 to 13, disk's at 14 to 20. On a Retina display each
       // 5-pt letter is centred exactly, 0.5 pt inside its bar: B at 0.5 to 5.5, device pixels 1 to 10; W at 7.5 to 12.5,
       // pixels 15 to 24; D at 14.5 to 19.5, pixels 29 to 38. So pixels 0, 11 to 14 and 25 to 28 hold no letter, and the
-      // gap, heights 5 to 8 pt (rows 10 to 15), none at all. (The app asks for no letters at the Thin width.)
+      // gap, heights 5 to 8 pt (rows 10 to 15), none at all. (The app draws its bars at width 3, never 1.)
       var r = readings(disk: -1)
       r.batteryShown = true
       r.battery = -1

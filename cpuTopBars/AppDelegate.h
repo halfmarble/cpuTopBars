@@ -33,27 +33,6 @@
 @property (weak) IBOutlet NSImageView *sineDemoView;
 @property (weak) IBOutlet NSImageView *flatDemoView;
 
-@property (weak) IBOutlet NSButton *packageButton;
-@property (weak) IBOutlet NSButton *coreButton;
-@property (weak) IBOutlet NSButton *logicalButton;
-
-@property (weak) IBOutlet NSButton *barButton;
-@property (weak) IBOutlet NSButton *dotButton;
-
-@property (weak) IBOutlet NSButton *solidButton;
-@property (weak) IBOutlet NSButton *strippedButton;
-
-@property (weak) IBOutlet NSButton *thinButton;
-@property (weak) IBOutlet NSButton *standardButton;
-@property (weak) IBOutlet NSButton *thickButton;
-
-@property (weak) IBOutlet NSButton *greyButton;
-@property (weak) IBOutlet NSButton *colorButton;
-
-@property (weak) IBOutlet NSButton *yellowButton;
-@property (weak) IBOutlet NSButton *greenButton;
-@property (weak) IBOutlet NSButton *blueButton;
-
 @property (nonatomic, strong, readwrite) NSStatusItem *statusItem;
 
 @property (weak) IBOutlet NSImageView *procAppIcon;

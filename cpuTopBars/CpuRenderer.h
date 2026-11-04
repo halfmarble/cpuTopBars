@@ -273,7 +273,6 @@ int CpuRenderCoreAtX(bool bar, CGFloat tickWidth, CGFloat tickTotalWidth, CGFloa
 // readings NULL: no block, the core graph starts at x = 0; else it starts after the block and the gap, unless
 // readings->extraOnly leaves the five out
 void CpuRender(CpuSummaryInfo* cpu_info, CGContextRef ctx, bool light, int granularity, bool bar, bool stripped, bool colored, CGFloat tickWidth, CGFloat tickTotalWidth, CGFloat imageWidth, int theme, const CpuReadings* readings);
-void CpuRenderDemo(CGContextRef ctx, CGFloat width, CGFloat height, int tint);
 
 __END_DECLS
 
