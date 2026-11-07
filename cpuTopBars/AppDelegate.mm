@@ -94,6 +94,7 @@ static NSString* ShowBarsKey = @"ShowBarsKey";
 static NSString* ShowGpuNeuralEngineKey = @"ShowGpuNeuralEngine";
 static NSString* ShowBatteryWifiKey = @"ShowBatteryWifi";
 static NSString* ShowBarLettersKey = @"ShowBarLetters";
+static NSString* ShowCoreBarsKey = @"ShowCoreBars";
 static NSString* TopRowsKey = @"TopRowsKey";
 
 #pragma mark - C APIs
@@ -1911,7 +1912,7 @@ static NSWindow* MakeHelpWindow(void)
       hoverExamples,
     ],
     @[
-      @"In Settings, \"Show Disk, RAM, CPU, E-core, P-core bars\" turns the wide bars off and leaves the core bars, \"Show battery and Wi-Fi bars\" turns those two off, \"Show GPU and Neural Engine bars\" those two, \"Show letters under the bars\" the letter under each wide bar (B battery, W Wi-Fi, D disk, M memory, N Neural Engine, G GPU, C CPU, E and P the efficiency and performance cores), and \"Refresh\" sets how often the bars move.",
+      @"In Settings, \"Show Disk, RAM, CPU, E-core, P-core bars\" turns the wide bars off and leaves the core bars, \"Show individual E-core and P-core bars\" turns the core bars off and leaves the E and P bars right after CPU, \"Show battery and Wi-Fi bars\" turns those two off, \"Show GPU and Neural Engine bars\" those two, \"Show letters under the bars\" the letter under each wide bar (B battery, W Wi-Fi, D disk, M memory, N Neural Engine, G GPU, C CPU, E and P the efficiency and performance cores), and \"Refresh\" sets how often the bars move.",
       @[
         MenuRowsHelpExample(&engineOff, loads, loadCount, MenuRowsExampleWhole, nil, -1, @"bars on"),
         MenuRowsHelpExample(&barsOff, loads, loadCount, MenuRowsExampleWhole, nil, -1, @"bars off"),
@@ -2093,6 +2094,7 @@ static bool showBars = true;         // the disk, memory, CPU, E-cores' and P-co
 static bool showGpuNeuralEngine = true; // with them, the GPU's bar and the Neural Engine's
 static bool showBatteryWifi = true;  // with them, the battery's bar and Wi-Fi's
 static bool showBarLetters = true;   // with them, the block's letters under its bars, in the menu bar only
+static bool showCoreBars = true;     // the core graph's bars; off, only while the bars above are on: none, and the E-cores' and P-cores' bars right after CPU
 // whether the GPU's bar and the Neural Engine's are drawn, read and listed: only with the bars they belong to
 static bool GpuShown(void)
 {
@@ -2105,10 +2107,12 @@ static bool BatteryWifiShown(void)
 }
 // the optional readings drawn (CPU_RENDER_SHOWN_*): the GPU's and the Neural Engine's with GpuShown, the battery's and
 // Wi-Fi's with BatteryWifiShown, each only while this Mac has it as last read (no internal battery, no Wi-Fi interface:
-// no slot). One mask for the image's width, the readings drawn, the hover labels and the panel
+// no slot), and CPU_RENDER_HIDE_CORES while the wide bars are on and the core bars off. One mask for the image's width,
+// the readings drawn, the hover labels and the panel
 static unsigned ReadingsShown(void)
 {
   unsigned shown = GpuShown() ? CPU_RENDER_SHOWN_GPU : 0;
+  shown |= (showBars && !showCoreBars) ? CPU_RENDER_HIDE_CORES : 0;
   if (BatteryWifiShown())
   {
     shown |= readingsWifi.present ? CPU_RENDER_SHOWN_WIFI : 0;
@@ -2131,6 +2135,7 @@ static NSSwitch* showBarsSwitch = nil;           // Show Disk, RAM, CPU, E-core,
 static NSSwitch* showGpuSwitch = nil;            // Show GPU and Neural Engine bars
 static NSSwitch* showBatteryWifiSwitch = nil;    // Show battery and Wi-Fi bars
 static NSSwitch* showBarLettersSwitch = nil;     // Show letters under the bars
+static NSSwitch* showCoreBarsSwitch = nil;       // Show individual E-core and P-core bars
 static NSSwitch* loginSwitch = nil;              // Launch at login
 static const int topRowsChoices[] = {3, 5, 10, TOP_COUNT};
 #define TOP_ROWS_CHOICES (sizeof(topRowsChoices)/sizeof(topRowsChoices[0]))
@@ -2284,7 +2289,9 @@ static NSMutableSet<NSTask*>* runningTasks = nil;
   coreSplit = CpuRenderEfficiencyBars(granularity, cpu_info.countLogical, cpuKinds);
   if (showBars)
   {
-    imageWidth += CpuRenderReadingsWidth(bar, drawWidth, tickTotalWidth, ReadingsShown(), coreSplit, (int)extraBars.size(), extraBars.data());
+    const unsigned shown = ReadingsShown();
+    imageWidth = (((shown & CPU_RENDER_HIDE_CORES) != 0) ? 0.0 : imageWidth) +
+      CpuRenderReadingsWidth(bar, drawWidth, tickTotalWidth, shown, coreSplit, (int)extraBars.size(), extraBars.data());
   }
   else
   {
@@ -2302,6 +2309,8 @@ static NSMutableSet<NSTask*>* runningTasks = nil;
   showBatteryWifiSwitch.enabled = showBars;
   showBarLettersSwitch.state = showBarLetters ? NSControlStateValueOn : NSControlStateValueOff;
   showBarLettersSwitch.enabled = showBars;
+  showCoreBarsSwitch.state = showCoreBars ? NSControlStateValueOn : NSControlStateValueOff;
+  showCoreBarsSwitch.enabled = showBars;
   topRowsChoice.selectedSegment = TopRowsChoiceIndex();
   refreshChoice.selectedSegment = RefreshChoiceIndex();
 }
@@ -2660,9 +2669,12 @@ static NSString* OthersRowText(int count)
   showBatteryWifiSwitch.enabled = showBars;
   showBarLettersSwitch = MenuRowsSettingsSwitch(showBarLetters, @selector(showBarLettersButtonClicked:), self);
   showBarLettersSwitch.enabled = showBars;
+  showCoreBarsSwitch = MenuRowsSettingsSwitch(showCoreBars, @selector(showCoreBarsButtonClicked:), self);
+  showCoreBarsSwitch.enabled = showBars;
   place(SettingsGroup(@[@[@"Refresh", refreshChoice],
                         @[@"Top processes", topRowsChoice],
                         @[@"Show Disk, RAM, CPU, E-core, P-core bars", showBarsSwitch],
+                        @[@"Show individual E-core and P-core bars", showCoreBarsSwitch],
                         @[@"Show battery and Wi-Fi bars", showBatteryWifiSwitch],
                         @[@"Show GPU and Neural Engine bars", showGpuSwitch],
                         @[@"Show letters under the bars", showBarLettersSwitch]]), 0.0, SETTINGS_SECTION_GAP);
@@ -2929,7 +2941,8 @@ static bool IsLight(NSAppearance* appearance)
   return ![name isEqualToString:NSAppearanceNameDarkAqua];
 }
 
-// a drawing of the menu bar's image for the help window (MenuRows.h), with the settings the status item draws with now
+// a drawing of the menu bar's image for the help window (MenuRows.h), with the settings the status item draws with now,
+// but for the core bars, drawn whatever Settings' switch for them says
 NSView* MenuRowsHelpExample(const CpuReadings* readings, const double* coreLoads, int coreLoadCount, MenuRowsExamplePart part,
                             NSString* label, int labelReading, NSString* caption)
 {
@@ -2992,7 +3005,7 @@ NSView* MenuRowsHelpExample(const CpuReadings* readings, const double* coreLoads
 // it is on the item, since no exit was delivered either, and a reading under it arms the label (BAR_TIP_DELAY)
 static NSRect barTipLayout = {{-1.0, -1.0}, {-1.0, -1.0}}; // x: the image's left in the button, width: the readings' slot; none: -1
 static bool barTipThree = false;            // the five readings (disk, memory, CPU, E-cores, P-cores) are drawn
-static unsigned barTipMask = 0;             // with them, the optional readings drawn (CpuRenderReadingsShown: battery, Wi-Fi, GPU and Neural Engine)
+static unsigned barTipMask = 0;             // with them, the optional readings drawn (CpuRenderReadingsShown: battery, Wi-Fi, GPU and Neural Engine), and CPU_RENDER_HIDE_CORES
 static int barTipSplit = 0;                 // with them, the core graph's split as drawn (CpuReadings efficiencyBars); 0: none
 static std::vector<CpuExtraReading> barTipBars; // the extra bars drawn right of the core graph, as drawn (a copy: extraBars is refilled each tick)
 static NSInteger barTipIndex = -1;          // the reading under the pointer, armed or shown: a reading's index with barTipMask
@@ -4149,9 +4162,11 @@ static void WifiRead(SystemInfoWifi* wifi, bool full)
   readings.extraCount = (int)extraBars.size();
   readings.extra = extraBars.data();
   readings.extraOnly = !showBars;
-  readings.efficiencyBars = coreSplit;
   // one mask (ReadingsShown) for the width worked out above and what is drawn
   const unsigned mask = ReadingsShown();
+  readings.coresHidden = ((mask & CPU_RENDER_HIDE_CORES) != 0);
+  // hidden, no split: the hover labels (updateBarTips:) then take the E-cores' and the P-cores' bars as readings of their own
+  readings.efficiencyBars = readings.coresHidden ? 0 : coreSplit;
   readings.gpuShown = ((mask & CPU_RENDER_SHOWN_GPU) != 0);
   readings.batteryShown = ((mask & CPU_RENDER_SHOWN_BATTERY) != 0);
   readings.wifiShown = ((mask & CPU_RENDER_SHOWN_WIFI) != 0);
@@ -4456,6 +4471,7 @@ static double TopInterval(void)
   [[NSUserDefaults standardUserDefaults] registerDefaults:@{ShowGpuNeuralEngineKey:@YES}];
   [[NSUserDefaults standardUserDefaults] registerDefaults:@{ShowBatteryWifiKey:@YES}];
   [[NSUserDefaults standardUserDefaults] registerDefaults:@{ShowBarLettersKey:@YES}];
+  [[NSUserDefaults standardUserDefaults] registerDefaults:@{ShowCoreBarsKey:@YES}];
   [[NSUserDefaults standardUserDefaults] registerDefaults:@{TopRowsKey:@5}];
 
   // Settings no longer offers granularity, style, line, width, appearance or theme: each takes its old default,
@@ -4471,6 +4487,7 @@ static double TopInterval(void)
   showGpuNeuralEngine = [[NSUserDefaults standardUserDefaults] boolForKey:ShowGpuNeuralEngineKey];
   showBatteryWifi = [[NSUserDefaults standardUserDefaults] boolForKey:ShowBatteryWifiKey];
   showBarLetters = [[NSUserDefaults standardUserDefaults] boolForKey:ShowBarLettersKey];
+  showCoreBars = [[NSUserDefaults standardUserDefaults] boolForKey:ShowCoreBarsKey];
   topShown = TopRows();
 
   [self updateRendererParameters];
@@ -5207,6 +5224,14 @@ static NSTimeInterval TopDelay(void)
 {
   showBars = (showBarsSwitch.state == NSControlStateValueOn);
   [[NSUserDefaults standardUserDefaults] setBool:showBars forKey:ShowBarsKey];
+  [self updateRendererParameters];
+  [self updateUI];
+}
+
+- (IBAction)showCoreBarsButtonClicked:(id)sender
+{
+  showCoreBars = (showCoreBarsSwitch.state == NSControlStateValueOn);
+  [[NSUserDefaults standardUserDefaults] setBool:showCoreBars forKey:ShowCoreBarsKey];
   [self updateRendererParameters];
   [self updateUI];
 }

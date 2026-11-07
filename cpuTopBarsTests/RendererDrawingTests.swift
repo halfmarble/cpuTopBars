@@ -734,6 +734,32 @@ extension FreeTests {
       }
     }
 
+    @Test func hiddenCoresDrawNoBarsAndKeepTheReadings() {
+      // an image with room for the graph: the block's 5 slots end at 50, its gap to 54, the one core bar from 54 to 58
+      var r = readings(disk: 1.0)
+      r.memory = 1.0; r.cpu = 1.0; r.efficiency = 1.0; r.performance = 1.0
+      let shownBars = render(bar: true, stripped: false, width: 60, readings: r)
+      #expect(shownBars.column(55).contains { $0 > 0 }, "the core bar, not hidden")
+      r.coresHidden = true
+      let hidden = render(bar: true, stripped: false, width: 60, readings: r)
+      for x in 50..<60 {
+        #expect(hidden.column(x).allSatisfy { $0 == 0 }, "clear at x \(x)")
+      }
+      // CPU, E and P: each 8 wide at 20, 30 and 40, drawn as without the bit; a split passed changes nothing
+      r.efficiencyBars = 2
+      let split = render(bar: true, stripped: false, width: 60, readings: r)
+      for x in [20, 30, 40] {
+        #expect(hidden.column(x + 7) == shownBars.column(x + 7), "the reading at \(x)")
+        #expect(hidden.column(x + 7).contains { $0 > 0 }, "drawn at \(x)")
+        #expect(hidden.column(x + 8).allSatisfy { $0 == 0 }, "the margin after \(x)")
+      }
+      #expect(split.bytes == hidden.bytes)
+      // with the block off the graph is drawn: the bit is ignored
+      r.extraOnly = true
+      let off = render(bar: true, stripped: false, width: 60, readings: r)
+      #expect(off.column(1).contains { $0 > 0 }, "the core bar at x = 0")
+    }
+
     @Test func extraReadingsTakeTheirOwnLetters() {
       // five extra readings at the image's right edge, after the block and the core bar: a wide one lettered 5, a wide one
       // lettered 7 and not read (its letter drawn all the same, as the battery's B is), a wide one with no letter, a wide one

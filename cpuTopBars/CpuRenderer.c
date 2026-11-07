@@ -186,7 +186,7 @@ unsigned CpuRenderReadingsShown(const CpuReadings* readings)
     return 0;
   }
   return (readings->gpuShown ? CPU_RENDER_SHOWN_GPU : 0) | (readings->wifiShown ? CPU_RENDER_SHOWN_WIFI : 0) |
-    (readings->batteryShown ? CPU_RENDER_SHOWN_BATTERY : 0);
+    (readings->batteryShown ? CPU_RENDER_SHOWN_BATTERY : 0) | (readings->coresHidden ? CPU_RENDER_HIDE_CORES : 0);
 }
 
 int CpuRenderReadingIndex(unsigned shown, int kind)
@@ -329,6 +329,12 @@ static CGFloat _split_gap(bool bar)
   return (bar ? 0.0 : 1.0) + CPU_RENDER_GROUP_GAP;
 }
 
+// the bars the graph's split comes after: none while the graph is hidden
+static int _split_bars(unsigned shown, int efficiencyBars)
+{
+  return ((shown & CPU_RENDER_HIDE_CORES) != 0) ? 0 : efficiencyBars;
+}
+
 // where block reading index starts: the slots of the readings before it, and the gap after memory when it is after
 // memory and any optional reading is shown (with none, the block has no gap). index may be the block's count: the end of
 // the readings' slots
@@ -380,11 +386,12 @@ CGFloat CpuRenderReadingX(bool bar, CGFloat tickWidth, CGFloat tickTotalWidth, u
   const CGFloat slot = _readings_slot(bar, tickWidth, tickTotalWidth);
   const int base = _readings_count(shown);
   const int efficiency = CpuRenderReadingEfficiency(shown);
-  if ((index < base) && (efficiencyBars > 0) && (index >= efficiency))
+  const int split = _split_bars(shown, efficiencyBars);
+  if ((index < base) && (split > 0) && (index >= efficiency))
   {
     // the E-cores' reading heads their bars, the P-cores' theirs, after the E-cores' bars and the split's gap
     const CGFloat x = _efficiency_x(bar, tickWidth, tickTotalWidth, shown);
-    return (index == efficiency) ? x : (x + slot + (efficiencyBars*CpuRenderCoreSlot(bar, tickWidth, tickTotalWidth, cores)) + _split_gap(bar));
+    return (index == efficiency) ? x : (x + slot + (split*CpuRenderCoreSlot(bar, tickWidth, tickTotalWidth, cores)) + _split_gap(bar));
   }
   if (index < base)
   {
@@ -409,9 +416,10 @@ CGFloat CpuRenderExtraWidth(bool bar, CGFloat tickWidth, CGFloat tickTotalWidth,
 CGFloat CpuRenderReadingsWidth(bool bar, CGFloat tickWidth, CGFloat tickTotalWidth, unsigned shown, int efficiencyBars, int extraCount, const CpuExtraReading* extra)
 {
   // as the core graph's own width: a slot per reading and the gap after memory, and 1 pt more for
-  // dots; the split's gap when the graph splits; then the extra readings' block
-  return _block_x(bar, tickWidth, tickTotalWidth, shown, _readings_count(shown)) + (bar ? 0.0 : 1.0) + CPU_RENDER_READINGS_GAP +
-    ((efficiencyBars > 0) ? _split_gap(bar) : 0.0) + _extra_width(bar, tickWidth, tickTotalWidth, extraCount, extra);
+  // dots; the graph's gap, and the split's when the graph splits, unless the graph is hidden; then the extra readings' block
+  return _block_x(bar, tickWidth, tickTotalWidth, shown, _readings_count(shown)) + (bar ? 0.0 : 1.0) +
+    (((shown & CPU_RENDER_HIDE_CORES) != 0) ? 0.0 : CPU_RENDER_READINGS_GAP) +
+    ((_split_bars(shown, efficiencyBars) > 0) ? _split_gap(bar) : 0.0) + _extra_width(bar, tickWidth, tickTotalWidth, extraCount, extra);
 }
 
 CGFloat CpuRenderCoreSlot(bool bar, CGFloat tickWidth, CGFloat tickTotalWidth, natural_t count)
@@ -452,7 +460,7 @@ int CpuRenderCoreAtX(bool bar, CGFloat tickWidth, CGFloat tickTotalWidth, CGFloa
 
 void CpuRenderGraphSpan(bool bar, CGFloat tickWidth, CGFloat tickTotalWidth, CGFloat imageWidth, bool readings, unsigned shown, int efficiencyBars, int extraCount, const CpuExtraReading* extra, CGFloat* start, CGFloat* end)
 {
-  if (readings && (efficiencyBars > 0))
+  if (readings && (_split_bars(shown, efficiencyBars) > 0))
   {
     *start = _efficiency_x(bar, tickWidth, tickTotalWidth, shown) + _readings_slot(bar, tickWidth, tickTotalWidth);
   }
@@ -900,10 +908,10 @@ void CpuRender(CpuSummaryInfo* cpu_info, CGContextRef ctx, bool light, int granu
   CGFloat end = imageWidth;
   const int extraCount = (readings != NULL) ? _extra_count(readings->extraCount) : 0;
   const CpuExtraReading* extra = (readings != NULL) ? readings->extra : NULL;
-  // the split after the E-cores' bars, only with the five readings drawn
-  const int split = (block && (readings->efficiencyBars > 0)) ? readings->efficiencyBars : 0;
   // the optional readings, only with the block's readings drawn
   const unsigned shown = block ? CpuRenderReadingsShown(readings) : 0;
+  // the split after the E-cores' bars, only with the five readings drawn and the bars not hidden
+  const int split = (block && (readings->efficiencyBars > 0)) ? _split_bars(shown, readings->efficiencyBars) : 0;
   const bool gpu = (shown & CPU_RENDER_SHOWN_GPU) != 0;
   const int base = _readings_count(shown);
   const natural_t cores = CpuSamplerGetCount(granularity); // at least 1
@@ -1000,7 +1008,7 @@ void CpuRender(CpuSummaryInfo* cpu_info, CGContextRef ctx, bool light, int granu
   natural_t count = cores;
   natural_t group = cpu_info->countLogical / count;  // 0 when no CPU could be read: nothing to average
   const CGFloat coreWidth = CpuRenderCoreWidth(bar, tickWidth, tickTotalWidth, count);
-  for (natural_t i=0; i<count; i++)
+  for (natural_t i=0; (i<count) && ((shown & CPU_RENDER_HIDE_CORES) == 0); i++)
   {
     CGFloat load = 0.0;
     if (group > 0)

@@ -213,6 +213,50 @@ extension FreeTests {
       #expect(CpuRenderReadingX(false, 4, 6, CPU_RENDER_SHOWN_BATTERY, 200, 0, 8, 0, nil, 1) == 6)
     }
 
+    @Test func hiddenCoresLeaveTheBlockAlone() {
+      // CpuRenderReadingsWidth with CPU_RENDER_HIDE_CORES: the slots alone, no gap before the graph, a split ignored
+      let hidden = CPU_RENDER_HIDE_CORES
+      #expect(CpuRenderReadingsWidth(true, 4, 6, hidden, 0, 0, nil) == 50)   // 5*10
+      #expect(CpuRenderReadingsWidth(true, 4, 6, hidden, 2, 0, nil) == 50)
+      // the optional readings still count: 9 slots + the gap after memory, 4
+      let all = hidden | CPU_RENDER_SHOWN_GPU | CPU_RENDER_SHOWN_WIFI | CPU_RENDER_SHOWN_BATTERY
+      #expect(CpuRenderReadingsWidth(true, 4, 6, all, 2, 0, nil) == 94)
+      // the bit is not a reading: the block's count and its kinds do not move
+      #expect(CpuRenderReadingsCount(hidden) == 5)
+      #expect(CpuRenderReadingEfficiency(hidden) == 3)
+      #expect(CpuRenderReadingPerformance(hidden) == 4)
+      #expect(CpuRenderReadingKind(hidden, 4) == CPU_RENDER_KIND_PERFORMANCE)
+      // CPU, E and P a slot apart, with a split passed or not (_block_x: 2, 3 and 4 slots)
+      for split in [Int32(0), 2] {
+        #expect(CpuRenderReadingX(true, 4, 6, hidden, 50, split, 8, 0, nil, 2) == 20)
+        #expect(CpuRenderReadingX(true, 4, 6, hidden, 50, split, 8, 0, nil, 3) == 30)
+        #expect(CpuRenderReadingX(true, 4, 6, hidden, 50, split, 8, 0, nil, 4) == 40)
+      }
+      // no graph to hover or to draw: its span is empty where the block ends
+      var start: CGFloat = -1
+      var end: CGFloat = -1
+      CpuRenderGraphSpan(true, 4, 6, 50, true, hidden, 2, 0, nil, &start, &end)
+      #expect(start == 50 && end == 50)
+      // the extra readings follow the block after their own gap, one gap and no more
+      var extras = [CpuExtraReading](repeating: CpuExtraReading(), count: 2)
+      extras.withUnsafeMutableBufferPointer { e in
+        #expect(CpuRenderReadingsWidth(true, 4, 6, hidden, 2, 2, e.baseAddress) == 74)   // 50 + 4 + 10 + 10
+        #expect(CpuRenderReadingX(true, 4, 6, hidden, 74, 2, 8, 2, e.baseAddress, 5) == 54)
+        CpuRenderGraphSpan(true, 4, 6, 74, true, hidden, 2, 2, e.baseAddress, &start, &end)
+        #expect(start == 50 && end == 50)
+      }
+    }
+
+    @Test func hiddenCoresInTheMask() {
+      // CpuRenderReadingsShown: the bit with coresHidden, none with the block off, so the graph is never hidden then
+      var r = CpuReadings()
+      #expect(CpuRenderReadingsShown(&r) == 0)
+      r.coresHidden = true
+      #expect(CpuRenderReadingsShown(&r) == CPU_RENDER_HIDE_CORES)
+      r.extraOnly = true
+      #expect(CpuRenderReadingsShown(&r) == 0)
+    }
+
     @Test func efficiencyBars() {
       // CpuRenderEfficiencyBars; granularity 0 is one bar, under 2 gives 0
       #expect(CpuRenderEfficiencyBars(0, 8, "EEEEPPPP") == 0)
