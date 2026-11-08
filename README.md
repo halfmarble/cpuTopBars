@@ -50,7 +50,7 @@ Rest the pointer on a bar for a second and its reading shows below the menu bar.
 
 * **Memory:** memory in use, with free, used and swapped memory and the total.
 
-<img src="screenshots/hover-memory.png" width="223" alt="Memory usage label">
+<img src="screenshots/hover-memory.png" width="220" alt="Memory usage label">
 
 * **CPU:** overall CPU use, with the efficiency and performance cores' use.
 
@@ -70,7 +70,7 @@ Rest the pointer on a bar for a second and its reading shows below the menu bar.
 
 * **Performance cores:** the same for the performance cores.
 
-<img src="screenshots/hover-p-cores.png" width="240" alt="Performance cores label">
+<img src="screenshots/hover-p-cores.png" width="243" alt="Performance cores label">
 
 ## 🛠 Installation
 
