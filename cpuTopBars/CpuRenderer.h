@@ -39,7 +39,7 @@ enum Theme
 
 // the readings block at the left of the image, bars drawn as the core graph's but twice as wide (in Dot style dots as the
 // graph's), then a clear gap before the core graph. The block's readings, from the left: the battery (CPU_RENDER_SHOWN_BATTERY:
-// a bar shaped as a battery, filled to its charge, with a lightning bolt), Wi-Fi's signal (CPU_RENDER_SHOWN_WIFI), disk, memory, then a clear gap, then the Neural
+// a bar shaped as a battery, filled to its charge, with a lightning bolt at 100%), Wi-Fi's signal (CPU_RENDER_SHOWN_WIFI), disk, memory, then a clear gap, then the Neural
 // Engine's and the GPU's bar (CPU_RENDER_SHOWN_GPU, both), CPU, the E-cores' CPU and the P-cores' CPU. Which of the optional
 // ones are drawn is a mask, shown, of CPU_RENDER_SHOWN_* bits, and each reading has a kind, CPU_RENDER_KIND_*; its index is
 // the number of shown readings of earlier kinds (CpuRenderReadingIndex, CpuRenderReadingKind), each index one slot. The gap
@@ -172,18 +172,20 @@ struct CpuReadings
   // true: the battery's reading, a bar as wide as the readings', shaped as a battery and filled to its charge, is drawn
   // first, left of everything; false is the default. Ignored when the block is not drawn
   bool batteryShown;
-  // the battery's charge, 0..1 (above 1 as 1); below 0, not read: the empty battery, no bolt, and in Dot style nothing.
+  // the battery's charge, 0..1 (above 1 as 1); below 0, not read: the outline and cap, the background inside, no bolt,
+  // and in Dot style nothing.
   // In bar style a battery as tall as the bar, whole, without the dashes: a body outlined one device pixel wide in the
   // menu bar's text colour at 0.9 (white on a dark menu bar, black on a light one), a solid cap CPU_RENDER_BATTERY_CAP pt
   // tall over the middle half of its width, and inside the outline a fill of that share of the inside's height, its top on
-  // a device pixel, in the text colour at 0.9, the bars' background above it; over them a lightning bolt at any charge. In
-  // Dot style a dot filled while the charge is 0.005 or more. Drawn only with batteryShown
+  // a device pixel, in the text colour at 0.9, the empty part above it in the power state's colour (below); over them,
+  // only at 100%, a lightning bolt. In Dot style a dot filled while the charge is 0.005 or more. Drawn only with
+  // batteryShown
   double battery;
-  // the power state, which colours the bolt, or in Dot style the dot: charging, systemGreen at 70% (each channel) at
-  // full opacity (the bolt systemRed at 70% on a light menu bar, as on battery); else on the adapter (batteryOnAC:
-  // charged, or held below full, and not charging), the bolt black on a dark menu bar and white on a light one (the dot
-  // the text colour at 0.9 opacity); else on battery, systemRed at 70% at full opacity, as a zeroed struct draws it.
-  // Drawn only with batteryShown
+  // the power state, which colours the empty part above the fill, the bolt, or in Dot style the dot: charging,
+  // systemGreen at 70% (each channel) at full opacity (the bolt systemRed at 70% on a light menu bar, as on battery);
+  // else on the adapter (batteryOnAC: charged, or held below full, and not charging), the empty part the bars'
+  // background, the bolt black on a dark menu bar and white on a light one (the dot the text colour at 0.9 opacity);
+  // else on battery, systemRed at 70% at full opacity, as a zeroed struct draws it. Drawn only with batteryShown
   bool batteryCharging;
   bool batteryOnAC;
   // true: Wi-Fi's reading, a bar as wide as the readings' (a dot in Dot style), is drawn after the battery's, before disk;
