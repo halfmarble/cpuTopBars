@@ -200,28 +200,29 @@ extension FreeTests {
       [("battery", false, false), ("charging", true, true), ("adapter", false, true)]
 
     // the bolt's colour in a power state, as 8-bit red, green and blue (_charging_color, _discharging_color): charging
-    // systemGreen at 70% on a dark menu bar and systemRed at 70% on a light one, on battery systemRed at 70%, on the
+    // systemBlue at 70%, on battery systemGreen at 70%, on the
     // adapter and not charging
     // black on a dark menu bar and white on a light one
     private func batteryBoltColour(charging: Bool, onAC: Bool, light: Bool) -> [Double] {
-      if charging && !light { return [34, 146, 61] }
-      if charging || !onAC { return light ? [178.5, 39, 42] : [178.5, 46, 48] }
+      if charging { return light ? [0, 95.1, 178.5] : [0, 101.5, 178.5] }
+      if !onAC { return light ? [36.5, 139.2, 62.2] : [33.7, 146.4, 61.5] }
       return light ? [255, 255, 255] : [0, 0, 0]
     }
 
     // the empty part's colour above the fill in a power state, as 8-bit red, green and blue, opaque (_charging_color,
-    // _discharging_color): charging systemGreen at 70%, on battery systemRed at 70%; nil on the adapter and not charging,
+    // _discharging_color): charging systemBlue at 70%, on battery systemGreen at 70%; nil on the adapter and not charging,
     // where it is the bars' background
     private func batteryEmptyColour(charging: Bool, onAC: Bool, light: Bool) -> [Double]? {
-      if charging { return light ? [36.5, 139.2, 62.2] : [33.7, 146.4, 61.5] }
-      if !onAC { return light ? [178.5, 39.3, 41.8] : [178.5, 46.2, 48.5] }
+      if charging { return light ? [0, 95.1, 178.5] : [0, 101.5, 178.5] }
+      if !onAC { return light ? [36.5, 139.2, 62.2] : [33.7, 146.4, 61.5] }
       return nil
     }
 
     // the bolt's coverage of the pixel at x, y: the share of the way the channel has gone from the fill's to the bolt's own,
     // opaque. The fill is read at height 3, below the bolt, in the bar's column 1, inside the outline (the full fill is the
-    // same on every row). The channel is the one where the two differ most (dark: the fill's 230 against charging green's
-    // 146 leaves 84 on green, but 196 on red; light: the fill's 0 against red's green 39 leaves red's 178.5), at least 178.5
+    // same on every row). The channel is the one where the two differ most (dark: the fill's 230 against charging blue's
+    // 0 on red leaves 230, and against on-battery green's 33.7 on red 196; light: the fill's 0 against charging blue's
+    // 178.5 on blue, and against on-battery green's 139.2 on green), at least 139.2
     private func batteryBoltCoverage(_ image: Bitmap, scale: Int, bolt: [Double], x: Int, y: Int) -> Double {
       let fill = image.pixel(x: scale, y: 3 * scale).map { Double($0) }
       let channel = (0..<3).max { abs(bolt[$0] - fill[$0]) < abs(bolt[$1] - fill[$1]) }!
@@ -241,7 +242,7 @@ extension FreeTests {
     @Test(arguments: [1, 2])
     func batteryFullBoltIsSolidInEveryState(scale: Int) {
       // at 100% the fill covers the inside of the outline, and the bolt is drawn over it solid, at full opacity, in the
-      // state's colour: green charging on a dark menu bar and red on a light one, red on battery, black on the adapter on a
+      // state's colour: blue charging, green on battery, black on the adapter on a
       // dark menu bar and white on a light one. Its box at x = 2.125 to 6.375 and heights 5.65 to 11.35 (the 16 - 5.7
       // centred snaps to 5, raised 0.5, then the icon's 0.125 and 0.15), so columns 0, 1 and 7 and the rows from 2 to 4 and
       // from 12 to 14 are the body alone, pixel for pixel: the outline and the full fill are one colour. The band across its
@@ -294,8 +295,8 @@ extension FreeTests {
       // x = 2 to 7 and heights 5 to 12, is left to batteryLowBoltBlendsFromYellowToRedOnBattery: inside the outline (x = 0 to 8 and heights 2 to 15,
       // less the device pixel on each side) every pixel up to the fill's top, the charge's share of the inside's 11 pt (1x)
       // or 24 px (2x) rounded to a device pixel, is the fill, the text colour at 0.9 (alpha about 230, white on a dark bar
-      // and black on a light one), and every pixel above it the empty part: charging the dark green and on battery the dark
-      // red, opaque, on the adapter the bars' background (alpha about 77, or 31 on a light bar). At 0.99 the fill rounds to
+      // and black on a light one), and every pixel above it the empty part: charging the dark blue and on battery the dark
+      // green, opaque, on the adapter the bars' background (alpha about 77, or 31 on a light bar). At 0.99 the fill rounds to
       // the whole inside at 1x and 2x, with no empty row and still no bolt
       for light in [false, true] {
         for state in Self.fullStates {
@@ -328,7 +329,7 @@ extension FreeTests {
       // channel from bright systemRed at 0% to bright systemYellow at 20% (_low_bolt_color): systemYellow (255, 204, 0) on a
       // light menu bar and (255, 214, 0) on a dark one, systemRed (255, 56, 60) and (255, 66, 69). At 2x its band across the
       // middle, x = 3 to 5 at heights 8 to 8.5 (px 6 to 10, row 16), is opaque in that colour, as at 100%; beside it, at x
-      // = 1 (px 2), the empty part's dark red. Charging or on the adapter at the same charge, and on battery at 20%, the
+      // = 1 (px 2), the empty part's dark green. Charging or on the adapter at the same charge, and on battery at 20%, the
       // band is the empty part's colour or the background: no bolt
       for light in [false, true] {
         let red: [Double] = light ? [255, 56.1, 59.9] : [255, 66.0, 69.1]
@@ -362,7 +363,7 @@ extension FreeTests {
       // bar's 2 pt, the Standard 6-pt's 1.5 (2 at 1x), the Thin 4-pt's 1), the cut columns clear there. Just under the cap
       // the body's top line, one device pixel, runs the whole width, cut columns included (alpha about 230). Under that
       // line the cut columns are the outline (the left and right lines, 230) or the inside: the full fill (230), the empty
-      // part's opaque green or red (255) below full while charging or on battery, else the background (under 127).
+      // part's opaque blue or green (255) below full while charging or on battery, else the background (under 127).
       // At every charge, full, 62, 20 and not read, in the solid and the dashed styles, in each power state, on either menu
       // bar
       for (tick, cut) in [(CGFloat(4), 2 * scale), (3, scale == 2 ? 3 : 2), (2, scale)] {
@@ -437,7 +438,7 @@ extension FreeTests {
     @Test func batteryBoltShrinksOnAThinBar() {
       // Thin: tickWidth 2, so the battery's bar is 4 pt wide, under the bolt's 4.25: the bolt drawn at 4 / 4.25 of its size,
       // its area 8.37 x 0.886 = 7.41 pt², over the outline's sides and inside the bar (the slot's gap after it, from 4, stays
-      // clear), black on the adapter's white and red on the battery's
+      // clear), black on the adapter's white and green on the battery's
       for onAC in [true, false] {
         let bolt = batteryBoltColour(charging: false, onAC: onAC, light: false)
         let image = render(bar: true, stripped: true, width: 120, readings: batteryReadings(1.0, onAC: onAC), scale: 2,
@@ -477,7 +478,7 @@ extension FreeTests {
       // 50% in the three power states: the outline, the cap and the fill are the same pixel for pixel, charging or not, and
       // so is everything else in the image but the empty part above the fill (its top at 3 + 5.5, snapped to 9 at 1x, and
       // 2.5 + 6 at 2x, height 8.5: px 17), x = 1 px to 1 px short of 8 pt, up to the outline's top line. There the states
-      // differ: charging the dark green, on battery the dark red, on the adapter the bars' background
+      // differ: charging the dark blue, on battery the dark green, on the adapter the bars' background
       let charging = render(bar: true, stripped: true, width: 120, readings: batteryReadings(0.5, charging: true, onAC: true), light: light, scale: scale)
       let adapter = render(bar: true, stripped: true, width: 120, readings: batteryReadings(0.5, onAC: true), light: light, scale: scale)
       let battery = render(bar: true, stripped: true, width: 120, readings: batteryReadings(0.5), light: light, scale: scale)
@@ -499,11 +500,11 @@ extension FreeTests {
           #expect(abs(p[3] - (light ? 31 : 77)) <= 2, "\(name), empty part: \(p)")
         }
       }
-      // the hue is the state's: green dominant charging, red dominant on battery
-      let green = charging.pixel(x: 4 * scale, y: y).map { Int($0) }
-      let red = battery.pixel(x: 4 * scale, y: y).map { Int($0) }
-      #expect(green[1] > green[0] + 80 && green[1] > green[2] + 70, "charging, green dominant: \(green)")
-      #expect(red[0] > red[1] + 120 && red[0] > red[2] + 120, "on battery, red dominant: \(red)")
+      // the hue is the state's: blue dominant charging, green dominant on battery
+      let blue = charging.pixel(x: 4 * scale, y: y).map { Int($0) }
+      let green = battery.pixel(x: 4 * scale, y: y).map { Int($0) }
+      #expect(blue[2] > blue[0] + 120 && blue[2] > blue[1] + 70, "charging, blue dominant: \(blue)")
+      #expect(green[1] > green[0] + 80 && green[1] > green[2] + 70, "on battery, green dominant: \(green)")
     }
 
     @Test(arguments: [false, true], [1, 2])
@@ -511,7 +512,7 @@ extension FreeTests {
       // at 1x and 2x every edge of the battery's outline and fill and of the Wi-Fi segments falls on a device pixel, so
       // no pixel of the battery's or Wi-Fi's bar is a blend (at these charges there is no bolt): each alpha is one the bar can
       // produce, within 2: clear (the cap's cuts), Wi-Fi's background 77 and fill 230, the battery's outline and fill
-      // 230, its empty part's opaque green or red 255 and its background 77 (31 on a light bar). A half-covered pixel would read between them. Charges 0.5 (the
+      // 230, its empty part's opaque blue or green 255 and its background 77 (31 on a light bar). A half-covered pixel would read between them. Charges 0.5 (the
       // fill's top at 3 + 5.5, snapped to 9 at 1x; at 2x 2.5 + 6, already on a device pixel), 0.62 and 0.2 (tops of 3 +
       // 6.82 and 3 + 2.2, snapped to device pixels; left unsnapped, their top rows would blend), in each power state.
       // Every column of the battery's bar, x = 0 to 8, and Wi-Fi's bar, x = 10 to 18

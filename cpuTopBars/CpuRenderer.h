@@ -183,10 +183,10 @@ struct CpuReadings
   // batteryShown
   double battery;
   // the power state, which colours the empty part above the fill, the bolt at 100%, or in Dot style the dot: charging,
-  // systemGreen at 70% (each channel) at full opacity (the bolt systemRed at 70% on a light menu bar, as on battery);
+  // systemBlue at 70% (each channel) at full opacity, the bolt too on either menu bar;
   // else on the adapter (batteryOnAC: charged, or held below full, and not charging), the empty part the bars'
   // background, the bolt black on a dark menu bar and white on a light one (the dot the text colour at 0.9 opacity);
-  // else on battery, systemRed at 70% at full opacity, as a zeroed struct draws it (below 20% the low bolt, above).
+  // else on battery, systemGreen at 70% at full opacity, as a zeroed struct draws it (below 20% the low bolt, above).
   // Drawn only with batteryShown
   bool batteryCharging;
   bool batteryOnAC;

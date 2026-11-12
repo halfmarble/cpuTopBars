@@ -638,20 +638,20 @@ static void _render_neural_engine(CGContextRef ctx, CGFloat x, int state, CGFloa
   _render_dot(ctx, x, state > 0, true, _text_color(light), color, tickWidth, light);
 }
 
-// the dark green of a charging battery's empty part, bolt and dot: systemGreen, sRGB (0.204, 0.780, 0.349) on a light menu bar and
-// (0.188, 0.820, 0.345) on a dark one, each channel at 70%: (0.143, 0.546, 0.244) and (0.132, 0.574, 0.241)
+// the dark blue of a charging battery's empty part, bolt and dot: systemBlue, sRGB (0.000, 0.533, 1.000) on a light menu bar and
+// (0.000, 0.569, 1.000) on a dark one (NSColor systemBlueColor in each appearance, measured on macOS 27), each channel
+// at 70%: (0.000, 0.373, 0.700) and (0.000, 0.398, 0.700)
 static rgb _charging_color(bool light)
 {
-  rgb c = light ? (rgb){0.143, 0.546, 0.244} : (rgb){0.132, 0.574, 0.241};
+  rgb c = light ? (rgb){0.000, 0.373, 0.700} : (rgb){0.000, 0.398, 0.700};
   return c;
 }
 
-// the dark red of a battery's empty part, bolt and dot on battery: systemRed, sRGB (1.000, 0.220, 0.235) on a light menu bar and
-// (1.000, 0.259, 0.271) on a dark one (NSColor systemRedColor in each appearance, measured on macOS 27), each channel
-// at 70%: (0.700, 0.154, 0.164) and (0.700, 0.181, 0.190)
+// the dark green of a battery's empty part, bolt and dot on battery: systemGreen, sRGB (0.204, 0.780, 0.349) on a light menu bar and
+// (0.188, 0.820, 0.345) on a dark one, each channel at 70%: (0.143, 0.546, 0.244) and (0.132, 0.574, 0.241)
 static rgb _discharging_color(bool light)
 {
-  rgb c = light ? (rgb){0.700, 0.154, 0.164} : (rgb){0.700, 0.181, 0.190};
+  rgb c = light ? (rgb){0.143, 0.546, 0.244} : (rgb){0.132, 0.574, 0.241};
   return c;
 }
 
@@ -659,9 +659,9 @@ static rgb _discharging_color(bool light)
 #define BATTERY_LOW 0.2
 
 // the low bolt's colour at charge, 0 up to BATTERY_LOW: each channel blended in a straight line from systemRed at 0 to
-// systemYellow at BATTERY_LOW, both bright, at full strength, so that the bolt stands out on the dark red empty part
+// systemYellow at BATTERY_LOW, both bright, at full strength, so that the bolt stands out on the dark green empty part
 // around it. systemYellow is sRGB (1.000, 0.800, 0.000) on a light menu bar and (1.000, 0.839, 0.000) on a dark one,
-// systemRed as above (both measured on macOS 27)
+// systemRed (1.000, 0.220, 0.235) on a light one and (1.000, 0.259, 0.271) on a dark one (both measured on macOS 27)
 static rgb _low_bolt_color(double charge, bool light)
 {
   const rgb red = light ? (rgb){1.000, 0.220, 0.235} : (rgb){1.000, 0.259, 0.271};
@@ -766,13 +766,13 @@ static void _render_battery_bar(CGContextRef ctx, CGFloat x, CGFloat width, doub
 
 // the battery's reading in its slot at x: in bar style its bar (_render_battery_bar), not read (charge below 0) the
 // outline and cap with the background inside and no bolt; else filled to the charge, the empty part above the fill
-// coloured by the power state: charging, the dark green; on battery, the dark red; on the adapter and not charging
-// (onAC), the bars' background. At 100% its bolt, coloured by the power state: charging, the dark green on a dark menu
-// bar and the dark red on a light one; on battery, the dark red; on the adapter and not charging, black on a dark menu
+// coloured by the power state: charging, the dark blue; on battery, the dark green; on the adapter and not charging
+// (onAC), the bars' background. At 100% its bolt, coloured by the power state: charging, the dark blue; on battery,
+// the dark green; on the adapter and not charging, black on a dark menu
 // bar and white on a light one. On battery below BATTERY_LOW (20%) the low bolt instead, bright yellow just under 20%
 // and blending to bright red at 0% (_low_bolt_color); charging or on the adapter, no bolt below 100%. In Dot style
-// nothing while not read, else the readings' dot, filled while the charge is 0.005 or more: the dark green while
-// charging, on the adapter the text colour, on battery the dark red
+// nothing while not read, else the readings' dot, filled while the charge is 0.005 or more: the dark blue while
+// charging, on the adapter the text colour, on battery the dark green
 static void _render_battery(CGContextRef ctx, CGFloat x, double charge, bool charging, bool onAC, CGFloat color, bool bar, CGFloat tickWidth, bool light, CGFloat bottom)
 {
   const CGFloat width = 2.0*tickWidth;
@@ -783,7 +783,7 @@ static void _render_battery(CGContextRef ctx, CGFloat x, double charge, bool cha
     const bool full = (charge >= 1.0);
     const bool low = read && !charging && !onAC && (charge < BATTERY_LOW);
     const rgb bolt = low ? _low_bolt_color(charge, light)
-                         : ((charging && light) ? _discharging_color(light) : ((charging || !onAC) ? state : _text_color(!light)));
+                         : ((charging || !onAC) ? state : _text_color(!light));
     _render_battery_bar(ctx, x, width, charge, (read && (charging || !onAC)) ? &state : NULL, (full || low) ? &bolt : NULL, color, light, bottom);
   }
   else if (read)
