@@ -184,7 +184,7 @@ extension FreeTests {
 
     // the battery alone, in a 120-wide image: its bar at x = 0 to 8, a reading's width, drawn last from DASHED_BOTTOM 2 in
     // the dashed style and whole, without the dashes. Its body is outlined one device pixel wide and capped from height 15
-    // to 16; its bolt, 4.25 x 5.7 pt, stands at x = 2.125 to 6.375 and heights 5.65 to 11.35 at 100% only; columns 0, 1
+    // to 16; its bolt, 4.25 x 5.7 pt, stands at x = 2.125 to 6.375 and heights 5.65 to 11.35 at 100%, and on battery below 20%; columns 0, 1
     // and 7 never hold it
     private func batteryReadings(_ charge: Double, charging: Bool = false, onAC: Bool = false) -> CpuReadings {
       var r = readings(disk: -1)
@@ -290,7 +290,8 @@ extension FreeTests {
 
     @Test(arguments: [0.0, 0.3, 0.62, 0.99], [1, 2])
     func batteryBelowFullHasNoBoltAndItsEmptyPartTakesTheStatesColour(charge: Double, scale: Int) {
-      // below 100% no bolt is drawn, in any state, on either menu bar: inside the outline (x = 0 to 8 and heights 2 to 15,
+      // below 100% no bolt is drawn, in any state, on either menu bar, but for the low bolt on battery below 20%, whose box,
+      // x = 2 to 7 and heights 5 to 12, is left to batteryLowBoltBlendsFromYellowToRedOnBattery: inside the outline (x = 0 to 8 and heights 2 to 15,
       // less the device pixel on each side) every pixel up to the fill's top, the charge's share of the inside's 11 pt (1x)
       // or 24 px (2x) rounded to a device pixel, is the fill, the text colour at 0.9 (alpha about 230, white on a dark bar
       // and black on a light one), and every pixel above it the empty part: charging the dark green and on battery the dark
@@ -303,8 +304,10 @@ extension FreeTests {
           let label = "charge \(charge), scale \(scale), light \(light), \(state.name)"
           let empty = batteryEmptyColour(charging: state.charging, onAC: state.onAC, light: light)
           let top = (2 * scale + 1) + Int((charge * Double(13 * scale - 2)).rounded())
+          let lowBolt = !state.charging && !state.onAC && charge < 0.2
           for y in (2 * scale + 1)..<(15 * scale - 1) {
             for x in 1..<(8 * scale - 1) {
+              if lowBolt && ((2 * scale)..<(7 * scale)).contains(x) && ((5 * scale)..<(12 * scale)).contains(y) { continue }
               let p = image.pixel(x: x, y: y).map { Double($0) }
               if y < top {
                 #expect(abs(p[3] - 230) <= 1 && p[0] == (light ? 0 : p[3]), "\(label), fill pixel \(x), \(y): \(p)")
@@ -314,6 +317,39 @@ extension FreeTests {
                 #expect(abs(p[3] - (light ? 31 : 77)) <= 2, "\(label), background pixel \(x), \(y): \(p)")
               }
             }
+          }
+        }
+      }
+    }
+
+    @Test(arguments: [0.0, 0.05, 0.1, 0.19])
+    func batteryLowBoltBlendsFromYellowToRedOnBattery(charge: Double) {
+      // on battery below 20% the bolt is drawn over the empty part, solid, at full opacity, in a colour blended channel by
+      // channel from bright systemRed at 0% to bright systemYellow at 20% (_low_bolt_color): systemYellow (255, 204, 0) on a
+      // light menu bar and (255, 214, 0) on a dark one, systemRed (255, 56, 60) and (255, 66, 69). At 2x its band across the
+      // middle, x = 3 to 5 at heights 8 to 8.5 (px 6 to 10, row 16), is opaque in that colour, as at 100%; beside it, at x
+      // = 1 (px 2), the empty part's dark red. Charging or on the adapter at the same charge, and on battery at 20%, the
+      // band is the empty part's colour or the background: no bolt
+      for light in [false, true] {
+        let red: [Double] = light ? [255, 56.1, 59.9] : [255, 66.0, 69.1]
+        let yellow: [Double] = light ? [255, 204, 0] : [255, 213.9, 0]
+        let t = charge / 0.2
+        let bolt = (0..<3).map { red[$0] + t * (yellow[$0] - red[$0]) }
+        let label = "charge \(charge), light \(light)"
+        let image = render(bar: true, stripped: true, width: 120, readings: batteryReadings(charge), light: light, scale: 2)
+        for x in 6..<10 {
+          let p = image.pixel(x: x, y: 16).map { Double($0) }
+          #expect(p[3] == 255 && (0..<3).allSatisfy { abs(p[$0] - bolt[$0]) <= 1.5 }, "\(label), band pixel \(x): \(p), want \(bolt)")
+        }
+        let empty = batteryEmptyColour(charging: false, onAC: false, light: light)!
+        let side = image.pixel(x: 2, y: 16).map { Double($0) }
+        #expect(side[3] == 255 && (0..<3).allSatisfy { abs(side[$0] - empty[$0]) <= 1.5 }, "\(label), beside the bolt: \(side)")
+        for (name, readings) in [("charging", batteryReadings(charge, charging: true, onAC: true)),
+                                 ("adapter", batteryReadings(charge, onAC: true)),
+                                 ("battery at 20%", batteryReadings(0.2))] {
+          let other = render(bar: true, stripped: true, width: 120, readings: readings, light: light, scale: 2)
+          for x in 6..<10 {
+            #expect(other.pixel(x: x, y: 16) == other.pixel(x: 2, y: 16), "\(label), \(name): no bolt, band pixel \(x)")
           }
         }
       }
@@ -473,7 +509,7 @@ extension FreeTests {
     @Test(arguments: [false, true], [1, 2])
     func batteryFillAndWifiSegmentsSitOnWholePixels(light: Bool, scale: Int) {
       // at 1x and 2x every edge of the battery's outline and fill and of the Wi-Fi segments falls on a device pixel, so
-      // no pixel of the battery's or Wi-Fi's bar is a blend (below 100% there is no bolt): each alpha is one the bar can
+      // no pixel of the battery's or Wi-Fi's bar is a blend (at these charges there is no bolt): each alpha is one the bar can
       // produce, within 2: clear (the cap's cuts), Wi-Fi's background 77 and fill 230, the battery's outline and fill
       // 230, its empty part's opaque green or red 255 and its background 77 (31 on a light bar). A half-covered pixel would read between them. Charges 0.5 (the
       // fill's top at 3 + 5.5, snapped to 9 at 1x; at 2x 2.5 + 6, already on a device pixel), 0.62 and 0.2 (tops of 3 +
