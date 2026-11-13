@@ -469,9 +469,9 @@ static void MemoryTexts(bool read, uint64_t usedBytes, uint64_t totalBytes, bool
 
 // the CPU's panel row and hover label, from one reading: cpu, its share busy, and the E-cores' and the P-cores',
 // efficiency and performance (each 0..1; below 0, not read). The row: "CPU:" and "21%", with each kind's share beside it
-// when both were read, "21% (Efficiency cores: 30%, Performance cores: 12%)"; "—" when not read. The label, one value to a
-// line (TipLines): "CPU:", and when both kinds were read "Efficiency cores:" and "Performance cores:"; "CPU: —" when not
-// read
+// when both were read, "21% (Efficiency cores: 30%, Performance cores: 12%)"; "—" when not read. The label, the average
+// over all CPUs alone (the E-cores' and the P-cores' bars have labels of their own): "CPU: 21%" (TipLines); "CPU: —" when
+// not read
 static void CpuTexts(double cpu, double efficiency, double performance, NSLocale* locale, NSArray<NSString*>* __strong * row, NSString* __strong * tipText)
 {
   if (cpu < 0.0)
@@ -481,16 +481,15 @@ static void CpuTexts(double cpu, double efficiency, double performance, NSLocale
     return;
   }
   NSString* share = ShareText(cpu, locale);
+  *tipText = TipLines(@[@[@"CPU:", share]]);
   if ((efficiency < 0.0) || (performance < 0.0))
   {
     *row = @[@"CPU:", share];
-    *tipText = TipLines(@[@[@"CPU:", share]]);
     return;
   }
   NSString* efficiencyText = ShareText(efficiency, locale);
   NSString* performanceText = ShareText(performance, locale);
   *row = @[@"CPU:", [NSString stringWithFormat:@"%@ (Efficiency cores: %@, Performance cores: %@)", share, efficiencyText, performanceText]];
-  *tipText = TipLines(@[@[@"CPU:", share], @[@"Efficiency cores:", efficiencyText], @[@"Performance cores:", performanceText]]);
 }
 
 // "3d 4h 27m"; under a day "4h 27m", under an hour "27m"

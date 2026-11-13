@@ -52,9 +52,9 @@ Rest the pointer on a bar for a second and its reading shows below the menu bar.
 
 <img src="screenshots/hover-memory.png" width="223" alt="Memory usage label">
 
-* **CPU:** overall CPU use, with the efficiency and performance cores' use.
+* **CPU:** overall CPU use, the average over all cores.
 
-<img src="screenshots/hover-cpu.png" width="208" alt="CPU label">
+<img src="screenshots/hover-cpu.png" width="175" alt="CPU label">
 
 * **GPU:** the GPU's use, and in the version built from this repository its power in watts, where it can be read.
 
