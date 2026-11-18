@@ -38,7 +38,7 @@ Rest the pointer on a bar for a second and its reading shows below the menu bar.
 
 * **Battery:** the battery's charge, and whether it is charging, not charging, charged, or on battery, with the time left when macOS gives one.
 
-<img src="screenshots/hover-battery.png" width="237" alt="Battery label">
+<img src="screenshots/hover-battery.png" width="250" alt="Battery label">
 
 * **Wi-Fi:** while connected, the signal, then the IP address, router, MAC address, security, channel, noise, transmit rate and PHY mode; else whether Wi-Fi is off or not connected. In the picture the addresses are blacked out.
 
@@ -70,7 +70,7 @@ Rest the pointer on a bar for a second and its reading shows below the menu bar.
 
 * **Performance cores:** the same for the performance cores.
 
-<img src="screenshots/hover-p-cores.png" width="243" alt="Performance cores label">
+<img src="screenshots/hover-p-cores.png" width="240" alt="Performance cores label">
 
 ## 🛠 Installation
 
