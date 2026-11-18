@@ -177,17 +177,17 @@ struct CpuReadings
   // In bar style a battery as tall as the bar, whole, without the dashes: a body outlined one device pixel wide in the
   // menu bar's text colour at 0.9 (white on a dark menu bar, black on a light one), a solid cap CPU_RENDER_BATTERY_CAP pt
   // tall over the middle half of its width, and inside the outline a fill of that share of the inside's height, its top on
-  // a device pixel, in the text colour at 0.9, the empty part above it in the power state's colour (below); over them,
-  // at 100%, a lightning bolt, and on battery below 20% the low bolt: bright systemYellow just under 20%, blending
+  // a device pixel, in the power state's colour (below), the empty part above it the bars' background; over them, at
+  // 100%, a lightning bolt, and on battery below 20% the low bolt: bright systemYellow just under 20%, blending
   // channel by channel to bright systemRed at 0%. In Dot style a dot filled while the charge is 0.005 or more. Drawn only with
   // batteryShown
   double battery;
-  // the power state, which colours the empty part above the fill, the bolt at 100%, or in Dot style the dot: charging,
-  // systemBlue at 70% (each channel) at full opacity, the bolt too on either menu bar;
-  // else on the adapter (batteryOnAC: charged, or held below full, and not charging), the empty part the bars'
-  // background, the bolt black on a dark menu bar and white on a light one (the dot the text colour at 0.9 opacity);
-  // else on battery, systemGreen at 70% at full opacity, as a zeroed struct draws it (below 20% the low bolt, above).
-  // Drawn only with batteryShown
+  // the power state, which colours the fill and the bolt at 100%, or in Dot style the dot: charging, the fill systemBlue
+  // at full strength and opacity, the bolt white, the dot systemBlue at 70% (each channel);
+  // else on the adapter (batteryOnAC: charged, or held below full, and not charging), the fill the text colour at 0.9,
+  // the bolt black on a dark menu bar and white on a light one (the dot the text colour at 0.9 opacity);
+  // else on battery, as a zeroed struct draws it, the fill systemGreen at full strength and opacity, the bolt white, the
+  // dot systemGreen at 70% (below 20% the low bolt, above). Drawn only with batteryShown
   bool batteryCharging;
   bool batteryOnAC;
   // true: Wi-Fi's reading, a bar as wide as the readings' (a dot in Dot style), is drawn after the battery's, before disk;
